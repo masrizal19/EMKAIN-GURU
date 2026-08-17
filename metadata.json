@@ -1,0 +1,8 @@
+{
+  "name": "EMKAIN GURU",
+  "description": "Edu-Creative Portal untuk Guru Hebat dalam menyiapkan soal ujian, materi pembelajaran, dan rencana pembelajaran secara otomatis dengan bantuan AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

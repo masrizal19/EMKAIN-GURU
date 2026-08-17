@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+@layer utilities {
+  .font-display {
+    font-family: 'Outfit', sans-serif;
+  }
+  .font-serif-display {
+    font-family: 'Playfair Display', serif;
+  }
+  .font-body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  
+  .neo-border {
+    border: 3.5px solid #1E1E1E;
+  }
+  
+  .neo-border-thin {
+    border: 2px solid #1E1E1E;
+  }
+  
+  .neo-shadow {
+    box-shadow: 4px 4px 0px 0px #1E1E1E;
+  }
+  
+  .neo-shadow-sm {
+    box-shadow: 2px 2px 0px 0px #1E1E1E;
+  }
+  
+  .neo-shadow-lg {
+    box-shadow: 8px 8px 0px 0px #1E1E1E;
+  }
+  
+  .neo-shadow-xl {
+    box-shadow: 12px 12px 0px 0px #1E1E1E;
+  }
+  
+  .neo-grid-bg {
+    background-color: #B4D3FF;
+    background-image: 
+      linear-gradient(rgba(120, 160, 240, 0.4) 1.5px, transparent 1.5px),
+      linear-gradient(90deg, rgba(120, 160, 240, 0.4) 1.5px, transparent 1.5px);
+    background-size: 32px 32px;
+  }
+
+  .neo-transition {
+    transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  .neo-btn {
+    transition: all 0.1s ease;
+  }
+  
+  .neo-btn:active {
+    transform: translate(2px, 2px);
+    box-shadow: 1px 1px 0px 0px #1E1E1E;
+  }
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background-color: #FAF6F0;
+  color: #1E1E1E;
+}
