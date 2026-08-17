@@ -60,7 +60,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       });
 
       if (authError) {
-        console.error('[LOGIN AUTH ERROR] Respons error dari Supabase Auth:', authError);
+        console.error('[LOGIN ERROR]', authError);
         setLoadingText('');
         setPassword(''); // Clear password field on error for security
 
@@ -81,18 +81,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           return;
         }
 
-        // NETWORK_ERROR
-        if (
-          errMsg.includes('failed to fetch') ||
-          errMsg.includes('network') ||
-          errMsg.includes('fetch failed') ||
-          errMsg.includes('timeout')
-        ) {
-          setError(`Koneksi jaringan gagal: Tidak dapat menghubungi server Supabase (${(supabase as any).supabaseUrl || 'unknown'}).`);
-          return;
-        }
-
-        setError(`Supabase Auth Error: ${authError.message || 'Terjadi kesalahan sistem'}`);
+        // Supabase/network error
+        setError('Tidak dapat terhubung ke layanan login. Silakan coba lagi.');
         return;
       }
 
@@ -115,8 +105,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         .maybeSingle();
 
       if (profileError) {
-        console.error('[LOGIN DATABASE ERROR] Gagal mengambil profil dari Supabase Database:', profileError);
-        setError(`Database Error: ${profileError.message || 'Gagal membaca tabel profiles.'}`);
+        console.error('[LOGIN ERROR] Gagal mengambil profil dari Supabase Database:', profileError);
+        setError('Tidak dapat terhubung ke layanan login. Silakan coba lagi.');
         setLoadingText('');
         setPassword('');
         return;
@@ -127,12 +117,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       // Auto-detect and handle Admin who was manually created and doesn't have a profile yet
       if (!activeProfile) {
         const userEmail = data.user.email;
-        const isAdmin = userEmail && (
-          userEmail.toLowerCase() === 'rizalsaragih498@gmail.com' ||
-          userEmail.toLowerCase() === 'admin@emkain.id' ||
-          userEmail.toLowerCase() === 'admin@gmail.com' ||
-          userEmail.toLowerCase().includes('admin')
-        );
+        const isAdmin = userEmail && userEmail.toLowerCase() === 'admin@gmail.com';
 
         if (isAdmin) {
           activeProfile = {
@@ -141,10 +126,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           };
           console.log('[LOGIN DEBUG] Profil kosong, mendeteksi admin default aktif.');
         } else {
-          console.error('[LOGIN PROFILE ERROR] Profil guru tidak ditemukan di tabel profiles.');
+          console.error('[LOGIN ERROR] Profil tidak ditemukan di database.');
           setLoadingText('');
           setPassword('');
-          setError('Profil guru belum tersedia di database. Hubungi administrator.');
+          setError('Profil belum tersedia di database. Hubungi administrator.');
           await supabase.auth.signOut();
           return;
         }
@@ -166,20 +151,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         onLoginSuccess(data.user.id);
       }, 500);
     } catch (err: any) {
-      console.error('[LOGIN UNEXPECTED EXCEPTION]', err);
+      console.error('[LOGIN ERROR]', err);
       setLoadingText('');
       setPassword('');
-      const catchMsg = (err?.message || '').toLowerCase();
-
-      if (
-        catchMsg.includes('failed to fetch') ||
-        catchMsg.includes('network') ||
-        catchMsg.includes('fetch failed')
-      ) {
-        setError('Tidak dapat terhubung ke internet. Pastikan koneksi Anda aktif.');
-      } else {
-        setError(`Kesalahan sistem: ${err?.message || 'Terjadi kegagalan proses login'}`);
-      }
+      setError('Tidak dapat terhubung ke layanan login. Silakan coba lagi.');
     }
   };
 
