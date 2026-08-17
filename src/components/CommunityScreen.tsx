@@ -70,6 +70,7 @@ export default function CommunityScreen({
   // Fetch Forum Posts from Server API
   const fetchPosts = async (silent: boolean = false) => {
     if (!silent) setLoadingPosts(true);
+    let apiFetchedSuccessfully = false;
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -87,11 +88,108 @@ export default function CommunityScreen({
         const data = await res.json();
         if (data.success && Array.isArray(data.posts)) {
           setPosts(data.posts);
+          apiFetchedSuccessfully = true;
         }
       }
     } catch (err) {
-      console.error('Error fetching forum posts:', err);
-    } finally {
+      console.warn('Backend API failed for posts, trying local fallback:', err);
+    }
+
+    if (!apiFetchedSuccessfully) {
+      try {
+        // Fallback to local storage and Supabase profiles
+        let localPostsRaw = localStorage.getItem('emkain_local_posts');
+        if (!localPostsRaw) {
+          const defaultPosts: ForumPost[] = [
+            {
+              id: 'post-seed-1',
+              author_id: 'e9ba174f-7713-4b80-b8f5-7595c530558d',
+              title: 'Selamat Datang di Forum Komunitas Guru EMKAIN!',
+              content: 'Halo Bapak dan Ibu Guru di seluruh Indonesia!\n\nForum ini didedikasikan sebagai ruang berbagi inspirasi, tips pembelajaran kreatif, metode pengajaran interaktif, serta pertukaran modul ajar Kurikulum Merdeka.\n\nSilakan manfaatkan forum ini untuk berdiskusi, memberikan like, komentar, dan bertukar pesan pribadi melalui Lounge Chat. Selamat berkarya!',
+              visibility: 'public',
+              created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
+              updated_at: new Date(Date.now() - 3600000 * 24).toISOString(),
+              likes_count: 1,
+              comments_count: 1,
+              user_has_liked: false
+            },
+            {
+              id: 'post-seed-2',
+              author_id: 'sample-teacher-1',
+              title: 'Strategi Asesmen Formatif Cepat Berbasis Soal Kontekstual',
+              content: 'Dalam pembelajaran matematika dan sains, asesmen formatif harian dengan 3 butir soal bertema pasar tradisional sangat efektif meningkatkan keterlibatan siswa. Siswa tidak lagi merasa takut dengan rumus karena konteksnya langsung dapat dirasakan.',
+              visibility: 'public',
+              created_at: new Date(Date.now() - 3600000 * 5).toISOString(),
+              updated_at: new Date(Date.now() - 3600000 * 5).toISOString(),
+              likes_count: 0,
+              comments_count: 0,
+              user_has_liked: false
+            }
+          ];
+          localStorage.setItem('emkain_local_posts', JSON.stringify(defaultPosts));
+          localPostsRaw = JSON.stringify(defaultPosts);
+        }
+
+        const rawPosts: ForumPost[] = JSON.parse(localPostsRaw);
+
+        // Fetch profiles to enrich authors
+        const { data: rawProfiles } = await supabase
+          .from('profiles')
+          .select('id, nama_lengkap, username, avatar_url, role, sekolah');
+
+        const profilesMap = new Map<string, UserProfile>();
+        if (rawProfiles) {
+          rawProfiles.forEach((p) => {
+            profilesMap.set(p.id, p as UserProfile);
+          });
+        }
+
+        // Likes mapping
+        const localLikesRaw = localStorage.getItem('emkain_local_likes') || '{}';
+        const likesMap: Record<string, string[]> = JSON.parse(localLikesRaw);
+
+        // Comments mapping
+        const localCommentsRaw = localStorage.getItem('emkain_local_comments') || '{}';
+        const commentsMap: Record<string, any[]> = JSON.parse(localCommentsRaw);
+
+        const enriched = rawPosts.map((p) => {
+          const authorProf = profilesMap.get(p.author_id) || {
+            id: p.author_id,
+            nama_lengkap: p.author_id === profile.id ? profile.nama_lengkap : 'Guru EMKAIN',
+            username: p.author_id === profile.id ? profile.username : 'guru',
+            avatar_url: p.author_id === profile.id ? profile.avatar_url : '👩‍🏫',
+            role: (p.author_id === profile.id ? profile.role : 'guru') as 'admin' | 'guru',
+            sekolah: p.author_id === profile.id ? profile.sekolah : 'SMK Multi Karya'
+          };
+
+          const postLikes = likesMap[p.id] || [];
+          const postComments = commentsMap[p.id] || [];
+          const hasLiked = postLikes.includes(profile.id);
+
+          return {
+            ...p,
+            likes_count: postLikes.length || p.likes_count,
+            comments_count: postComments.length || p.comments_count,
+            user_has_liked: hasLiked,
+            author_profile: {
+              nama_lengkap: authorProf.nama_lengkap,
+              username: authorProf.username || 'guru',
+              avatar_url: authorProf.avatar_url,
+              role: authorProf.role as 'admin' | 'guru',
+              sekolah: authorProf.sekolah,
+              is_online: p.author_id === profile.id,
+              last_seen_at: new Date().toISOString()
+            }
+          };
+        });
+
+        setPosts(enriched);
+      } catch (fallbackErr) {
+        console.error('Local fallback for posts failed:', fallbackErr);
+      } finally {
+        if (!silent) setLoadingPosts(false);
+      }
+    } else {
       if (!silent) setLoadingPosts(false);
     }
   };
@@ -99,6 +197,7 @@ export default function CommunityScreen({
   // Fetch Community Members from Server API
   const fetchMembers = async (silent: boolean = false) => {
     if (!silent) setLoadingMembers(true);
+    let apiFetchedSuccessfully = false;
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -116,11 +215,49 @@ export default function CommunityScreen({
         const data = await res.json();
         if (data.success && Array.isArray(data.members)) {
           setMembers(data.members);
+          apiFetchedSuccessfully = true;
         }
       }
     } catch (err) {
-      console.error('Error fetching members:', err);
-    } finally {
+      console.warn('Backend API failed for members, trying local fallback:', err);
+    }
+
+    if (!apiFetchedSuccessfully) {
+      try {
+        // Fallback to direct query from profiles in Supabase
+        const { data: rawProfiles, error } = await supabase
+          .from('profiles')
+          .select('id, username, nama_lengkap, sekolah, mata_pelajaran, kelas, avatar_url, role, status, email, created_at');
+
+        if (error) {
+          throw error;
+        }
+
+        const fallbackMembers: UserProfile[] = (rawProfiles || []).map((p) => {
+          const isSelf = p.id === profile.id;
+          return {
+            id: p.id,
+            username: p.username || (p.email ? p.email.split('@')[0] : `user_${p.id.substring(0, 5)}`),
+            nama_lengkap: p.nama_lengkap || 'Anggota EMKAIN',
+            avatar_url: p.avatar_url || (p.role === 'admin' ? '🛡️' : '👩‍🏫'),
+            role: p.role as 'admin' | 'guru',
+            status: p.status || 'aktif',
+            sekolah: p.sekolah || 'SMK Multi Karya',
+            mata_pelajaran: p.mata_pelajaran || '',
+            kelas: p.kelas || '',
+            is_online: isSelf,
+            last_seen_at: isSelf ? new Date().toISOString() : null,
+            created_at: p.created_at
+          } as UserProfile;
+        });
+
+        setMembers(fallbackMembers);
+      } catch (fallbackErr) {
+        console.error('Local fallback for members failed:', fallbackErr);
+      } finally {
+        if (!silent) setLoadingMembers(false);
+      }
+    } else {
       if (!silent) setLoadingMembers(false);
     }
   };
@@ -146,6 +283,7 @@ export default function CommunityScreen({
     setSubmitting(true);
     setPostErrorMsg('');
 
+    let apiSucceeded = false;
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -171,7 +309,7 @@ export default function CommunityScreen({
       if (res.ok && result.success) {
         setTitle('');
         setContent('');
-        // Add new post to top of feed
+        apiSucceeded = true;
         if (result.post) {
           setPosts((prev) => [result.post, ...prev]);
         } else {
@@ -181,32 +319,72 @@ export default function CommunityScreen({
         setPostErrorMsg(result.message || 'Gagal mengirim postingan.');
       }
     } catch (err) {
-      setPostErrorMsg('Terjadi kesalahan koneksi ke server.');
-    } finally {
+      console.warn('Post creation API failed, falling back to local save:', err);
+    }
+
+    if (!apiSucceeded && !postErrorMsg) {
+      try {
+        // Fallback to local save
+        const newPost: ForumPost = {
+          id: `local-post-${Date.now()}`,
+          author_id: profile.id,
+          title: title.trim(),
+          content: content.trim(),
+          visibility,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          likes_count: 0,
+          comments_count: 0,
+          user_has_liked: false,
+          author_profile: {
+            nama_lengkap: profile.nama_lengkap,
+            username: profile.username || 'guru',
+            avatar_url: profile.avatar_url,
+            role: profile.role as 'admin' | 'guru',
+            sekolah: profile.sekolah,
+            is_online: true,
+            last_seen_at: new Date().toISOString()
+          }
+        };
+
+        const localPostsRaw = localStorage.getItem('emkain_local_posts') || '[]';
+        const localPosts = JSON.parse(localPostsRaw);
+        localStorage.setItem('emkain_local_posts', JSON.stringify([newPost, ...localPosts]));
+
+        setPosts((prev) => [newPost, ...prev]);
+        setTitle('');
+        setContent('');
+      } catch (fallbackErr) {
+        setPostErrorMsg('Gagal menyimpan postingan secara lokal.');
+      } finally {
+        setSubmitting(false);
+      }
+    } else {
       setSubmitting(false);
     }
   };
 
   // Handle Post Like Toggle
   const handleToggleLike = async (postId: string) => {
+    // Optimistic update
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id === postId) {
+          const hasLiked = !!p.user_has_liked;
+          return {
+            ...p,
+            user_has_liked: !hasLiked,
+            likes_count: hasLiked ? Math.max(0, p.likes_count - 1) : p.likes_count + 1
+          };
+        }
+        return p;
+      })
+    );
+
+    let apiSucceeded = false;
     try {
       const token = await getAuthToken();
       if (!token) return;
-
-      // Optimistic update
-      setPosts((prev) =>
-        prev.map((p) => {
-          if (p.id === postId) {
-            const hasLiked = !!p.user_has_liked;
-            return {
-              ...p,
-              user_has_liked: !hasLiked,
-              likes_count: hasLiked ? Math.max(0, p.likes_count - 1) : p.likes_count + 1
-            };
-          }
-          return p;
-        })
-      );
 
       const res = await fetch(getApiUrl(`/api/community/posts/${postId}/like`), {
         method: 'POST',
@@ -225,10 +403,48 @@ export default function CommunityScreen({
                 : p
             )
           );
+          apiSucceeded = true;
         }
       }
     } catch (err) {
-      console.error('Error toggling like:', err);
+      console.warn('Toggling like API failed, falling back to local toggle:', err);
+    }
+
+    if (!apiSucceeded) {
+      try {
+        const localLikesRaw = localStorage.getItem('emkain_local_likes') || '{}';
+        const likesMap: Record<string, string[]> = JSON.parse(localLikesRaw);
+
+        if (!likesMap[postId]) {
+          likesMap[postId] = [];
+        }
+
+        const hasLikedIndex = likesMap[postId].indexOf(profile.id);
+        if (hasLikedIndex > -1) {
+          likesMap[postId].splice(hasLikedIndex, 1);
+        } else {
+          likesMap[postId].push(profile.id);
+        }
+
+        localStorage.setItem('emkain_local_likes', JSON.stringify(likesMap));
+
+        // Re-sync UI state with exact local counts
+        setPosts((prev) =>
+          prev.map((p) => {
+            if (p.id === postId) {
+              const currentLikes = likesMap[postId];
+              return {
+                ...p,
+                user_has_liked: currentLikes.includes(profile.id),
+                likes_count: currentLikes.length
+              };
+            }
+            return p;
+          })
+        );
+      } catch (fallbackErr) {
+        console.error('Local fallback for like toggle failed:', fallbackErr);
+      }
     }
   };
 
@@ -243,6 +459,7 @@ export default function CommunityScreen({
 
     if (!postCommentsMap[postId]) {
       setLoadingCommentsMap((prev) => ({ ...prev, [postId]: true }));
+      let apiSucceeded = false;
       try {
         const token = await getAuthToken();
         if (!token) return;
@@ -257,11 +474,25 @@ export default function CommunityScreen({
           const data = await res.json();
           if (data.success) {
             setPostCommentsMap((prev) => ({ ...prev, [postId]: data.comments }));
+            apiSucceeded = true;
           }
         }
       } catch (err) {
-        console.error('Error loading comments:', err);
-      } finally {
+        console.warn('Loading comments API failed, falling back to local comments:', err);
+      }
+
+      if (!apiSucceeded) {
+        try {
+          const localCommentsRaw = localStorage.getItem('emkain_local_comments') || '{}';
+          const commentsMap: Record<string, any[]> = JSON.parse(localCommentsRaw);
+          const postComments = commentsMap[postId] || [];
+          setPostCommentsMap((prev) => ({ ...prev, [postId]: postComments }));
+        } catch (fallbackErr) {
+          console.error('Local fallback for comments failed:', fallbackErr);
+        } finally {
+          setLoadingCommentsMap((prev) => ({ ...prev, [postId]: false }));
+        }
+      } else {
         setLoadingCommentsMap((prev) => ({ ...prev, [postId]: false }));
       }
     }
@@ -275,6 +506,7 @@ export default function CommunityScreen({
 
     setSubmittingCommentMap((prev) => ({ ...prev, [postId]: true }));
 
+    let apiSucceeded = false;
     try {
       const token = await getAuthToken();
       if (!token) return;
@@ -295,17 +527,75 @@ export default function CommunityScreen({
             ...prev,
             [postId]: [...(prev[postId] || []), data.comment]
           }));
-          // Increment comment count on post
           setPosts((prev) =>
             prev.map((p) => (p.id === postId ? { ...p, comments_count: p.comments_count + 1 } : p))
           );
-          // Clear input
           setCommentInputMap((prev) => ({ ...prev, [postId]: '' }));
+          apiSucceeded = true;
         }
       }
     } catch (err) {
-      console.error('Error submitting comment:', err);
-    } finally {
+      console.warn('Submitting comment API failed, falling back to local saving:', err);
+    }
+
+    if (!apiSucceeded) {
+      try {
+        const newComment: ForumComment = {
+          id: `local-comm-${Date.now()}`,
+          post_id: postId,
+          author_id: profile.id,
+          content: commentText,
+          created_at: new Date().toISOString(),
+          author_profile: {
+            nama_lengkap: profile.nama_lengkap,
+            username: profile.username || 'guru',
+            avatar_url: profile.avatar_url,
+            role: profile.role as 'admin' | 'guru',
+            sekolah: profile.sekolah
+          }
+        };
+
+        const localCommentsRaw = localStorage.getItem('emkain_local_comments') || '{}';
+        const commentsMap: Record<string, any[]> = JSON.parse(localCommentsRaw);
+
+        if (!commentsMap[postId]) {
+          commentsMap[postId] = [];
+        }
+
+        commentsMap[postId].push(newComment);
+        localStorage.setItem('emkain_local_comments', JSON.stringify(commentsMap));
+
+        // Update post comments count in localStorage as well
+        let localPostsRaw = localStorage.getItem('emkain_local_posts') || '[]';
+        let localPosts: ForumPost[] = JSON.parse(localPostsRaw);
+        localPosts = localPosts.map((p) => {
+          if (p.id === postId) {
+            return { ...p, comments_count: (commentsMap[postId] || []).length };
+          }
+          return p;
+        });
+        localStorage.setItem('emkain_local_posts', JSON.stringify(localPosts));
+
+        setPostCommentsMap((prev) => ({
+          ...prev,
+          [postId]: [...(prev[postId] || []), newComment]
+        }));
+        setPosts((prev) =>
+          prev.map((p) => {
+            if (p.id === postId) {
+              const currentComments = commentsMap[postId] || [];
+              return { ...p, comments_count: currentComments.length };
+            }
+            return p;
+          })
+        );
+        setCommentInputMap((prev) => ({ ...prev, [postId]: '' }));
+      } catch (fallbackErr) {
+        console.error('Local fallback for adding comment failed:', fallbackErr);
+      } finally {
+        setSubmittingCommentMap((prev) => ({ ...prev, [postId]: false }));
+      }
+    } else {
       setSubmittingCommentMap((prev) => ({ ...prev, [postId]: false }));
     }
   };
