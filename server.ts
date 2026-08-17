@@ -16,7 +16,28 @@ import { createServer as createViteServer } from 'vite';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+
+// CORS configuration middleware (Custom robust CORS solution)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = ['https://app.mkverse.my.id', 'https://api.mkverse.my.id'];
+  
+  if (origin && (allowedOrigins.includes(origin) || origin.startsWith('https://ais-') || origin.includes('localhost'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', 'https://app.mkverse.my.id');
+  }
+  
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 app.use(express.json());
 

@@ -41,10 +41,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     }
 
     setError('');
+    
+    if (!isSupabaseConfigured) {
+      setError('Konfigurasi Supabase tidak tersedia. Silakan isi VITE_SUPABASE_URL dan VITE_SUPABASE_PUBLISHABLE_KEY pada pengaturan proyek atau GitHub Secrets.');
+      console.error('[ENV ERROR] Supabase environment variables are not loaded in the client-side bundle.');
+      return;
+    }
+
     setLoadingText('MENGOTENTIKASI AKUN...');
 
     try {
       const normalizedEmail = trimmedEmail.toLowerCase();
+      console.log('[LOGIN DEBUG] Memulai proses login untuk email:', normalizedEmail);
 
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -52,6 +60,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       });
 
       if (authError) {
+        console.error('[LOGIN AUTH ERROR] Respons error dari Supabase Auth:', authError);
         setLoadingText('');
         setPassword(''); // Clear password field on error for security
 
@@ -79,30 +88,39 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           errMsg.includes('fetch failed') ||
           errMsg.includes('timeout')
         ) {
-          setError('Tidak dapat terhubung ke server. Silakan coba lagi.');
+          setError(`Koneksi jaringan gagal: Tidak dapat menghubungi server Supabase (${(supabase as any).supabaseUrl || 'unknown'}).`);
           return;
         }
 
-        // SERVER_ERROR (HTTP 500 or unknown server issue)
-        setError('Terjadi masalah pada server. Silakan coba lagi.');
+        setError(`Supabase Auth Error: ${authError.message || 'Terjadi kesalahan sistem'}`);
         return;
       }
 
       if (!data.session || !data.user) {
+        console.error('[LOGIN ERROR] Sesi berhasil dibuat tetapi data session/user kosong.');
         setLoadingText('');
         setPassword('');
-        setError('Terjadi masalah pada server. Silakan coba lagi.');
+        setError('Sesi autentikasi tidak valid. Silakan coba lagi.');
         return;
       }
 
+      console.log('[LOGIN DEBUG] Autentikasi Supabase berhasil. ID Pengguna:', data.user.id);
       setLoadingText('MEMVALIDASI PROFIL...');
 
       // Fetch the user's profile
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', data.user.id)
         .maybeSingle();
+
+      if (profileError) {
+        console.error('[LOGIN DATABASE ERROR] Gagal mengambil profil dari Supabase Database:', profileError);
+        setError(`Database Error: ${profileError.message || 'Gagal membaca tabel profiles.'}`);
+        setLoadingText('');
+        setPassword('');
+        return;
+      }
 
       let activeProfile = profileData;
 
@@ -121,10 +139,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             role: 'admin',
             status: 'aktif'
           };
+          console.log('[LOGIN DEBUG] Profil kosong, mendeteksi admin default aktif.');
         } else {
+          console.error('[LOGIN PROFILE ERROR] Profil guru tidak ditemukan di tabel profiles.');
           setLoadingText('');
           setPassword('');
-          setError('Profil guru belum tersedia. Hubungi administrator.');
+          setError('Profil guru belum tersedia di database. Hubungi administrator.');
           await supabase.auth.signOut();
           return;
         }
@@ -132,6 +152,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       // Verify if account status is active
       if (activeProfile.status === 'nonaktif') {
+        console.warn('[LOGIN BLOCKED] Akun dinonaktifkan oleh administrator.');
         setLoadingText('');
         setPassword('');
         setError('Akun Anda tidak aktif. Hubungi administrator sekolah.');
@@ -139,11 +160,13 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         return;
       }
 
+      console.log('[LOGIN DEBUG] Sesi login disetujui penuh.');
       setLoadingText('MASUK BERHASIL! 🎉');
       setTimeout(() => {
         onLoginSuccess(data.user.id);
       }, 500);
     } catch (err: any) {
+      console.error('[LOGIN UNEXPECTED EXCEPTION]', err);
       setLoadingText('');
       setPassword('');
       const catchMsg = (err?.message || '').toLowerCase();
@@ -153,9 +176,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         catchMsg.includes('network') ||
         catchMsg.includes('fetch failed')
       ) {
-        setError('Tidak dapat terhubung ke server. Silakan coba lagi.');
+        setError('Tidak dapat terhubung ke internet. Pastikan koneksi Anda aktif.');
       } else {
-        setError('Terjadi masalah pada server. Silakan coba lagi.');
+        setError(`Kesalahan sistem: ${err?.message || 'Terjadi kegagalan proses login'}`);
       }
     }
   };
