@@ -73,35 +73,41 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
   // Fetch all teachers
   const fetchTeachers = async () => {
     setLoading(true);
+    let apiFetchedSuccessfully = false;
     try {
       const token = await getValidToken();
       if (token) {
-        const response = await fetch(getApiUrl('/api/admin/teachers'), {
-          headers: {
-            'Authorization': `Bearer ${token}`
+        try {
+          const response = await fetch(getApiUrl('/api/admin/teachers'), {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && Array.isArray(result.teachers)) {
+              setTeachers(result.teachers);
+              apiFetchedSuccessfully = true;
+            }
           }
-        });
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success && Array.isArray(result.teachers)) {
-            setTeachers(result.teachers);
-            setLoading(false);
-            return;
-          }
+        } catch (apiErr) {
+          console.warn('Backend API fetching failed, falling back to direct Supabase query:', apiErr);
         }
       }
 
-      // Fallback to client query if backend unreachable
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'guru')
-        .order('created_at', { ascending: false });
+      if (!apiFetchedSuccessfully) {
+        // Fallback to client query if backend unreachable or failed
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('role', 'guru')
+          .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('Error fetching teachers:', error);
-      } else {
-        setTeachers((data as UserProfile[]) || []);
+        if (error) {
+          console.error('Error fetching teachers via Supabase fallback:', error);
+        } else {
+          setTeachers((data as UserProfile[]) || []);
+        }
       }
     } catch (err) {
       console.error('Network error fetching teachers:', err);
