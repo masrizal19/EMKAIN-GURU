@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserProfile } from '../types';
+import { getApiUrl } from '../lib/api';
 import { 
   Search, 
   UserPlus, 
@@ -75,7 +76,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
     try {
       const token = await getValidToken();
       if (token) {
-        const response = await fetch('/api/admin/teachers', {
+        const response = await fetch(getApiUrl('/api/admin/teachers'), {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -160,7 +161,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         return;
       }
 
-      const response = await fetch('/api/admin/edit-user', {
+      const response = await fetch(getApiUrl('/api/admin/edit-user'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -211,7 +212,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         return;
       }
 
-      const response = await fetch('/api/admin/create-user', {
+      const response = await fetch(getApiUrl('/api/admin/create-user'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -301,7 +302,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         return;
       }
 
-      const response = await fetch('/api/admin/edit-user', {
+      const response = await fetch(getApiUrl('/api/admin/edit-user'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -357,7 +358,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
 
       console.log('[DELETE USER DEBUG] target user id:', deletingTeacher.id, 'target email:', deletingTeacher.email);
 
-      const response = await fetch('/api/admin/delete-user', {
+      const response = await fetch(getApiUrl('/api/admin/delete-user'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

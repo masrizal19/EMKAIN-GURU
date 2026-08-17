@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Link as LinkIcon, ExternalLink, Globe, Sparkles } from 'lucide-react';
+import { getApiUrl } from '../../lib/api';
 
 interface ChatLinkModalProps {
   isOpen: boolean;
@@ -29,7 +30,7 @@ export default function ChatLinkModal({ isOpen, onClose, onInsertLink }: ChatLin
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/chat/link-preview', {
+      const res = await fetch(getApiUrl('/api/chat/link-preview'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: cleanUrl })

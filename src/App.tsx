@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { AppScreen, Difficulty, QuestionType, GeneratedSet, RecentWork, UserProfile } from './types';
 import { INITIAL_RECENT_WORKS, SAMPLE_QUESTION_SETS, generateQuestions } from './data';
+import { getApiUrl } from './lib/api';
 
 // Import Screens
 import LoginScreen from './components/LoginScreen';
@@ -325,7 +326,7 @@ export default function App() {
       try {
         const { data: { session: s } } = await supabase.auth.getSession();
         if (s?.access_token) {
-          await fetch('/api/community/heartbeat', {
+          await fetch(getApiUrl('/api/community/heartbeat'), {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${s.access_token}` }
           });
@@ -339,7 +340,7 @@ export default function App() {
       try {
         const { data: { session: s } } = await supabase.auth.getSession();
         if (s?.access_token) {
-          const res = await fetch('/api/chat/unread-count', {
+          const res = await fetch(getApiUrl('/api/chat/unread-count'), {
             headers: { 'Authorization': `Bearer ${s.access_token}` }
           });
           if (res.ok) {
@@ -379,7 +380,7 @@ export default function App() {
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
       if (s?.access_token) {
-        await fetch('/api/community/presence-offline', {
+        await fetch(getApiUrl('/api/community/presence-offline'), {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${s.access_token}` }
         });

@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Conversation, ChatMessage, ChatAttachment } from '../types';
+import { getApiUrl } from '../lib/api';
 import UserProfileModal from './UserProfileModal';
 import ChatMessageItem from './chat/ChatMessageItem';
 import ChatAttachmentMenu from './chat/ChatAttachmentMenu';
@@ -151,7 +152,7 @@ export default function ChatScreen({
         return;
       }
 
-      const res = await fetch('/api/chat/conversations', {
+      const res = await fetch(getApiUrl('/api/chat/conversations'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -188,7 +189,7 @@ export default function ChatScreen({
         return;
       }
 
-      const res = await fetch(`/api/chat/conversations/${convId}/messages`, {
+      const res = await fetch(getApiUrl(`/api/chat/conversations/${convId}/messages`), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -213,7 +214,7 @@ export default function ChatScreen({
       const token = await getAuthToken();
       if (!token) return;
 
-      const res = await fetch('/api/chat/conversations/direct', {
+      const res = await fetch(getApiUrl('/api/chat/conversations/direct'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -246,7 +247,7 @@ export default function ChatScreen({
         return;
       }
 
-      const res = await fetch('/api/community/members', {
+      const res = await fetch(getApiUrl('/api/community/members'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -327,7 +328,7 @@ export default function ChatScreen({
           formData.append('files', p.file);
         });
 
-        const uploadRes = await fetch('/api/chat/upload', {
+        const uploadRes = await fetch(getApiUrl('/api/chat/upload'), {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`
@@ -368,7 +369,7 @@ export default function ChatScreen({
         link_description: pendingLink?.description
       };
 
-      const res = await fetch(`/api/chat/conversations/${selectedConversation.id}/messages`, {
+      const res = await fetch(getApiUrl(`/api/chat/conversations/${selectedConversation.id}/messages`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -406,7 +407,7 @@ export default function ChatScreen({
       const token = await getAuthToken();
       if (!token) return;
 
-      const res = await fetch(`/api/chat/messages/${msgId}`, {
+      const res = await fetch(getApiUrl(`/api/chat/messages/${msgId}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`

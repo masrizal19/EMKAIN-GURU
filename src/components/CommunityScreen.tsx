@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, ForumPost, ForumComment } from '../types';
+import { getApiUrl } from '../lib/api';
 import UserProfileModal from './UserProfileModal';
 import {
   MessageSquare,
@@ -76,7 +77,7 @@ export default function CommunityScreen({
         return;
       }
 
-      const res = await fetch('/api/community/posts', {
+      const res = await fetch(getApiUrl('/api/community/posts'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -105,7 +106,7 @@ export default function CommunityScreen({
         return;
       }
 
-      const res = await fetch('/api/community/members', {
+      const res = await fetch(getApiUrl('/api/community/members'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -153,7 +154,7 @@ export default function CommunityScreen({
         return;
       }
 
-      const res = await fetch('/api/community/posts', {
+      const res = await fetch(getApiUrl('/api/community/posts'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -207,7 +208,7 @@ export default function CommunityScreen({
         })
       );
 
-      const res = await fetch(`/api/community/posts/${postId}/like`, {
+      const res = await fetch(getApiUrl(`/api/community/posts/${postId}/like`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -246,7 +247,7 @@ export default function CommunityScreen({
         const token = await getAuthToken();
         if (!token) return;
 
-        const res = await fetch(`/api/community/posts/${postId}/comments`, {
+        const res = await fetch(getApiUrl(`/api/community/posts/${postId}/comments`), {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -278,7 +279,7 @@ export default function CommunityScreen({
       const token = await getAuthToken();
       if (!token) return;
 
-      const res = await fetch(`/api/community/posts/${postId}/comments`, {
+      const res = await fetch(getApiUrl(`/api/community/posts/${postId}/comments`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
