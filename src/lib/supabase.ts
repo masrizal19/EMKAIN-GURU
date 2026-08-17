@@ -17,13 +17,29 @@ console.log('[SUPABASE CONFIG]', {
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabasePublishableKey);
 
+function sanitizeSupabaseUrl(url: string | undefined): string {
+  if (!url) return '';
+  let cleaned = url.trim();
+  // Strip trailing slashes first
+  cleaned = cleaned.replace(/\/+$/, '');
+  // Remove trailing path segments like /rest/v1, /rest, /auth/v1, /auth, /v1, /api
+  cleaned = cleaned.replace(/\/(rest|auth|api|v1)+(\/(rest|auth|api|v1)+)*$/, '');
+  // Strip trailing slashes again
+  cleaned = cleaned.replace(/\/+$/, '');
+  return cleaned;
+}
+
+const rawUrl = supabaseUrl || 'https://placeholder-project.supabase.co';
+const sanitizedUrl = sanitizeSupabaseUrl(rawUrl);
+const activeKey = supabasePublishableKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy.key';
+
 // Print only the hostname for development debugging
 if (isSupabaseConfigured) {
   try {
-    const parsed = new URL(supabaseUrl);
+    const parsed = new URL(sanitizedUrl);
     console.log(`Supabase project: ${parsed.host}`);
   } catch (e) {
-    console.log(`Supabase project: ${supabaseUrl}`);
+    console.log(`Supabase project: ${sanitizedUrl}`);
   }
 } else {
   console.warn(
@@ -32,8 +48,4 @@ if (isSupabaseConfigured) {
   );
 }
 
-// Fallbacks for type-safety so createClient doesn't crash on undefined at compilation time
-const activeUrl = supabaseUrl || 'https://placeholder-project.supabase.co';
-const activeKey = supabasePublishableKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy.key';
-
-export const supabase = createClient(activeUrl, activeKey);
+export const supabase = createClient(sanitizedUrl, activeKey);
