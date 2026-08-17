@@ -8,6 +8,7 @@ import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { AppScreen, Difficulty, QuestionType, GeneratedSet, RecentWork, UserProfile } from './types';
 import { INITIAL_RECENT_WORKS, SAMPLE_QUESTION_SETS, generateQuestions } from './data';
 import { getApiUrl } from './lib/api';
+import { isProductionStaticBuild } from './lib/supabase_store';
 
 // Import Screens
 import LoginScreen from './components/LoginScreen';
@@ -324,6 +325,10 @@ export default function App() {
 
     const pingHeartbeat = async () => {
       try {
+        if (isProductionStaticBuild()) {
+          // No Express backend in static build, skip pinging local endpoints
+          return;
+        }
         const { data: { session: s } } = await supabase.auth.getSession();
         if (s?.access_token) {
           await fetch(getApiUrl('/api/community/heartbeat'), {
@@ -339,6 +344,22 @@ export default function App() {
     const fetchUnreadCount = async () => {
       try {
         const { data: { session: s } } = await supabase.auth.getSession();
+        if (!s?.user?.id) return;
+
+        if (isProductionStaticBuild()) {
+          const { data: messages } = await supabase
+            .from('messages')
+            .select('sender_id, read_by')
+            .not('sender_id', 'eq', s.user.id);
+
+          const count = (messages || []).filter(
+            m => !m.read_by || !m.read_by.includes(s.user.id)
+          ).length;
+
+          setUnreadChatCount(count);
+          return;
+        }
+
         if (s?.access_token) {
           const res = await fetch(getApiUrl('/api/chat/unread-count'), {
             headers: { 'Authorization': `Bearer ${s.access_token}` }
@@ -378,12 +399,14 @@ export default function App() {
   // Handle logout
   const handleLogout = async () => {
     try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      if (s?.access_token) {
-        await fetch(getApiUrl('/api/community/presence-offline'), {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${s.access_token}` }
-        });
+      if (!isProductionStaticBuild()) {
+        const { data: { session: s } } = await supabase.auth.getSession();
+        if (s?.access_token) {
+          await fetch(getApiUrl('/api/community/presence-offline'), {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${s.access_token}` }
+          });
+        }
       }
     } catch (e) {
       // ignore

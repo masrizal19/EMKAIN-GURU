@@ -7,6 +7,15 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { getApiUrl } from '../lib/api';
+import {
+  isProductionStaticBuild,
+  fetchMembersDirect,
+  fetchConversationsDirect,
+  fetchMessagesDirect,
+  startDirectConversationDirect,
+  sendMessageDirect,
+  deleteMessageDirect
+} from '../lib/supabase_store';
 import UserProfileModal from './UserProfileModal';
 import ChatMessageItem from './chat/ChatMessageItem';
 import ChatAttachmentMenu from './chat/ChatAttachmentMenu';
@@ -146,6 +155,20 @@ export default function ChatScreen({
   const fetchConversations = async (silent: boolean = false) => {
     if (!silent && isMountedRef.current) setLoadingConvs(true);
     try {
+      if (isProductionStaticBuild()) {
+        const directConvs = await fetchConversationsDirect(profile.id);
+        if (isMountedRef.current) {
+          setConversations(directConvs);
+          if (selectedConversation) {
+            const updated = directConvs.find((c: Conversation) => c.id === selectedConversation.id);
+            if (updated) {
+              setSelectedConversation(updated);
+            }
+          }
+        }
+        return;
+      }
+
       const token = await getAuthToken();
       if (!token) {
         if (!silent && isMountedRef.current) setLoadingConvs(false);
@@ -183,6 +206,14 @@ export default function ChatScreen({
   const fetchMessages = async (convId: string, silent: boolean = false) => {
     if (!silent && isMountedRef.current) setLoadingMsgs(true);
     try {
+      if (isProductionStaticBuild()) {
+        const directMsgs = await fetchMessagesDirect(convId, profile.id);
+        if (isMountedRef.current) {
+          setMessages(directMsgs);
+        }
+        return;
+      }
+
       const token = await getAuthToken();
       if (!token) {
         if (!silent && isMountedRef.current) setLoadingMsgs(false);
@@ -211,6 +242,17 @@ export default function ChatScreen({
   // Start or open direct conversation with a target user
   const startDirectConversationWithUser = async (targetUser: UserProfile) => {
     try {
+      if (isProductionStaticBuild()) {
+        const conv = await startDirectConversationDirect(profile.id, targetUser.id);
+        if (isMountedRef.current) {
+          setSelectedConversation(conv);
+          setIsNewChatModalOpen(false);
+          fetchMessages(conv.id);
+          fetchConversations(true);
+        }
+        return;
+      }
+
       const token = await getAuthToken();
       if (!token) return;
 
@@ -241,6 +283,16 @@ export default function ChatScreen({
   const fetchAllMembersForNewChat = async () => {
     if (isMountedRef.current) setLoadingAllMembers(true);
     let apiFetchedSuccessfully = false;
+
+    if (isProductionStaticBuild()) {
+      const directMembers = await fetchMembersDirect(profile.id);
+      if (isMountedRef.current) {
+        setAllMembers(directMembers);
+        setLoadingAllMembers(false);
+      }
+      return;
+    }
+
     try {
       const token = await getAuthToken();
       if (token) {
@@ -351,6 +403,84 @@ export default function ChatScreen({
     setErrorMessage(null);
 
     try {
+      if (isProductionStaticBuild()) {
+        let uploadedAttachments: ChatAttachment[] = [];
+
+        if (hasFiles) {
+          for (const p of pendingFiles) {
+            const fileExt = p.file.name.split('.').pop();
+            const filePath = `chat/${selectedConversation.id}/${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+            
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('messages')
+              .upload(filePath, p.file, { cacheControl: '3600', upsert: true });
+
+            if (!uploadError && uploadData) {
+              const { data: { publicUrl } } = supabase.storage
+                .from('messages')
+                .getPublicUrl(filePath);
+
+              uploadedAttachments.push({
+                id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                name: p.file.name,
+                size: p.file.size,
+                mime_type: p.file.type,
+                url: publicUrl,
+                file_category: p.category
+              });
+            } else {
+              const reader = new FileReader();
+              const base64Promise = new Promise<string>((resolve) => {
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(p.file);
+              });
+              const dataUrl = await base64Promise;
+
+              uploadedAttachments.push({
+                id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                name: p.file.name,
+                size: p.file.size,
+                mime_type: p.file.type,
+                url: dataUrl,
+                file_category: p.category
+              });
+            }
+          }
+        }
+
+        let finalType: 'text' | 'file' | 'image' | 'video' | 'audio' | 'link' = 'text';
+        if (uploadedAttachments.length > 0) {
+          const firstCat = uploadedAttachments[0].file_category;
+          if (firstCat === 'image') finalType = 'image';
+          else if (firstCat === 'video') finalType = 'video';
+          else if (firstCat === 'audio') finalType = 'audio';
+          else finalType = 'file';
+        } else if (hasLink) {
+          finalType = 'link';
+        }
+
+        const msgPayload = {
+          message: messageText,
+          message_type: finalType,
+          attachments: uploadedAttachments,
+          link_url: pendingLink?.url,
+          link_title: pendingLink?.title,
+          link_description: pendingLink?.description
+        };
+
+        const newMsg = await sendMessageDirect(selectedConversation.id, profile.id, msgPayload);
+        if (isMountedRef.current) {
+          setMessages((prev) => [...prev, newMsg]);
+          setInputText('');
+          setPendingFiles([]);
+          setPendingLink(null);
+          setIsAttachmentMenuOpen(false);
+          fetchConversations(true);
+        }
+        setSendingMsg(false);
+        return;
+      }
+
       const token = await getAuthToken();
       if (!token) {
         setErrorMessage('Sesi telah berakhir. Silakan muat ulang halaman.');
@@ -443,6 +573,15 @@ export default function ChatScreen({
   // Delete message
   const handleDeleteMessage = async (msgId: string) => {
     try {
+      if (isProductionStaticBuild()) {
+        const ok = await deleteMessageDirect(msgId);
+        if (ok && isMountedRef.current) {
+          setMessages((prev) => prev.filter((m) => m.id !== msgId));
+          fetchConversations(true);
+        }
+        return;
+      }
+
       const token = await getAuthToken();
       if (!token) return;
 
@@ -454,8 +593,10 @@ export default function ChatScreen({
       });
 
       if (res.ok) {
-        setMessages((prev) => prev.filter((m) => m.id !== msgId));
-        fetchConversations(true);
+        if (isMountedRef.current) {
+          setMessages((prev) => prev.filter((m) => m.id !== msgId));
+          fetchConversations(true);
+        }
       }
     } catch (err) {
       console.error('Error deleting message:', err);

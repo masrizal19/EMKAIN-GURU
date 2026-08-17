@@ -7,6 +7,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, ForumPost, ForumComment } from '../types';
 import { getApiUrl } from '../lib/api';
+import {
+  isProductionStaticBuild,
+  fetchMembersDirect,
+  fetchPostsDirect,
+  createPostDirect,
+  deletePostDirect,
+  togglePostLikeDirect,
+  fetchCommentsDirect,
+  createCommentDirect
+} from '../lib/supabase_store';
 import UserProfileModal from './UserProfileModal';
 import {
   MessageSquare,
@@ -71,6 +81,14 @@ export default function CommunityScreen({
   const fetchPosts = async (silent: boolean = false) => {
     if (!silent) setLoadingPosts(true);
     let apiFetchedSuccessfully = false;
+
+    if (isProductionStaticBuild()) {
+      const directPosts = await fetchPostsDirect(profile.id);
+      setPosts(directPosts);
+      setLoadingPosts(false);
+      return;
+    }
+
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -198,6 +216,15 @@ export default function CommunityScreen({
   const fetchMembers = async (silent: boolean = false) => {
     if (!silent) setLoadingMembers(true);
     let apiFetchedSuccessfully = false;
+
+    if (isProductionStaticBuild()) {
+      const directMembers = await fetchMembersDirect(profile.id);
+      // Include current user in community directory as well
+      setMembers([profile, ...directMembers]);
+      setLoadingMembers(false);
+      return;
+    }
+
     try {
       const token = await getAuthToken();
       if (!token) {
@@ -282,6 +309,23 @@ export default function CommunityScreen({
 
     setSubmitting(true);
     setPostErrorMsg('');
+
+    if (isProductionStaticBuild()) {
+      const post = await createPostDirect(profile.id, {
+        title: title.trim(),
+        content: content.trim(),
+        visibility
+      });
+      if (post) {
+        setPosts((prev) => [post, ...prev]);
+        setTitle('');
+        setContent('');
+      } else {
+        setPostErrorMsg('Gagal mengirim postingan ke Supabase.');
+      }
+      setSubmitting(false);
+      return;
+    }
 
     let apiSucceeded = false;
     try {
@@ -381,6 +425,18 @@ export default function CommunityScreen({
       })
     );
 
+    if (isProductionStaticBuild()) {
+      const res = await togglePostLikeDirect(postId, profile.id);
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? { ...p, user_has_liked: res.user_has_liked, likes_count: res.likes_count }
+            : p
+        )
+      );
+      return;
+    }
+
     let apiSucceeded = false;
     try {
       const token = await getAuthToken();
@@ -459,6 +515,14 @@ export default function CommunityScreen({
 
     if (!postCommentsMap[postId]) {
       setLoadingCommentsMap((prev) => ({ ...prev, [postId]: true }));
+
+      if (isProductionStaticBuild()) {
+        const comments = await fetchCommentsDirect(postId);
+        setPostCommentsMap((prev) => ({ ...prev, [postId]: comments }));
+        setLoadingCommentsMap((prev) => ({ ...prev, [postId]: false }));
+        return;
+      }
+
       let apiSucceeded = false;
       try {
         const token = await getAuthToken();
@@ -505,6 +569,22 @@ export default function CommunityScreen({
     if (!commentText) return;
 
     setSubmittingCommentMap((prev) => ({ ...prev, [postId]: true }));
+
+    if (isProductionStaticBuild()) {
+      const comment = await createCommentDirect(postId, profile.id, commentText);
+      if (comment) {
+        setPostCommentsMap((prev) => ({
+          ...prev,
+          [postId]: [...(prev[postId] || []), comment]
+        }));
+        setPosts((prev) =>
+          prev.map((p) => (p.id === postId ? { ...p, comments_count: p.comments_count + 1 } : p))
+        );
+        setCommentInputMap((prev) => ({ ...prev, [postId]: '' }));
+      }
+      setSubmittingCommentMap((prev) => ({ ...prev, [postId]: false }));
+      return;
+    }
 
     let apiSucceeded = false;
     try {
