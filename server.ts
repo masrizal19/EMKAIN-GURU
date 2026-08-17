@@ -57,6 +57,13 @@ function isSupabaseConfigured() {
 }
 
 // -------------------------------------------------------------
+// HEALTH CHECK ENDPOINT
+// -------------------------------------------------------------
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// -------------------------------------------------------------
 // TEMPORARY RECOVERY ENDPOINT: Reset Admin Password (Admin Access Recovery)
 // -------------------------------------------------------------
 app.post('/api/recovery/reset-admin-password', async (req, res): Promise<any> => {
