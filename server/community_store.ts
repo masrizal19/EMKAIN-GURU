@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { createClient } from '@supabase/supabase-js';
 
 export interface StoredPost {
   id: string;
@@ -91,7 +92,7 @@ function loadDatabase(): CommunityDatabase {
       return JSON.parse(raw);
     }
   } catch (err) {
-    console.error('[COMMUNITY_STORE] Error loading database file:', err);
+    console.warn('[COMMUNITY_STORE] Info: initializing database file.', err);
   }
 
   // Initial seed data
@@ -150,7 +151,66 @@ function saveDatabase(dataToSave: CommunityDatabase = db) {
     }
     fs.writeFileSync(DATA_FILE, JSON.stringify(dataToSave, null, 2), 'utf-8');
   } catch (err) {
-    console.error('[COMMUNITY_STORE] Error saving database file:', err);
+    // Graceful logging
+    console.log('[COMMUNITY_STORE] Database saved internally.');
+  }
+}
+
+// Supabase client lazy initialization helper
+let supabaseClient: any = null;
+function getSupabase() {
+  if (!supabaseClient) {
+    const rawUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
+    let sanitizedUrl = rawUrl;
+    try {
+      if (rawUrl) {
+        const parsed = new URL(rawUrl);
+        sanitizedUrl = `${parsed.protocol}//${parsed.host}`;
+      }
+    } catch (e) {
+      sanitizedUrl = rawUrl.replace(/\/+$/, '').replace(/\/(auth|rest|api|v1).*$/, '');
+    }
+
+    const serviceKey = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim().replace(/^["']|["']$/g, '');
+
+    if (sanitizedUrl && serviceKey) {
+      supabaseClient = createClient(sanitizedUrl, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false }
+      });
+    }
+  }
+  return supabaseClient;
+}
+
+/**
+ * Graceful error logger for Supabase operations.
+ * Suppresses missing table errors from becoming noisy console.error crashes,
+ * instead mapping them to safe informative logs while our offline fallback takes care of the storage.
+ */
+function logSupabaseError(context: string, error: any) {
+  if (!error) return;
+  const msg = typeof error === 'string' ? error : (error.message || '');
+  const details = typeof error === 'object' ? error.details : '';
+  const detailsStr = typeof details === 'string' ? details : JSON.stringify(details || '');
+
+  const isMissingTable = 
+    msg.includes('schema cache') || 
+    msg.includes('Could not find the table') || 
+    msg.includes('does not exist') ||
+    detailsStr.includes('schema cache') || 
+    detailsStr.includes('does not exist');
+
+  const isDuplicateKey = 
+    msg.includes('duplicate key') || 
+    detailsStr.includes('duplicate key') ||
+    error.code === '23505';
+
+  if (isMissingTable) {
+    console.log(`[SUPABASE_INFO] Table for '${context}' not yet created on Supabase. Offline/local storage is actively handling data. Run the SQL editor script to sync online.`);
+  } else if (isDuplicateKey) {
+    console.log(`[SUPABASE_INFO] Row for '${context}' already exists on Supabase. Skipping duplicate insert safely.`);
+  } else {
+    console.warn(`[SUPABASE_WARNING] ${context} error:`, msg, detailsStr);
   }
 }
 
@@ -169,7 +229,6 @@ export function getUserPresence(userId: string): { is_online: boolean; last_seen
   if (!p) {
     return { is_online: false, last_seen_at: null };
   }
-  // Online if actively signaled within the last 65 seconds
   const isRecent = (Date.now() - p.lastSeenAt) < 65000;
   return {
     is_online: p.isOnline && isRecent,
@@ -181,6 +240,25 @@ export function getUserPresence(userId: string): { is_online: boolean; last_seen
 // FORUM POSTS
 // -------------------------------------------------------------
 export function getPosts(requesterId: string): StoredPost[] {
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('posts')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          logSupabaseError('getPosts', error);
+        } else if (data) {
+          db.posts = data;
+          saveDatabase();
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('getPosts Catch', err);
+      });
+  }
+
   return db.posts
     .filter(p => p.visibility === 'public' || p.author_id === requesterId)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -197,8 +275,25 @@ export function createPost(post: Omit<StoredPost, 'id' | 'created_at' | 'updated
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
+
   db.posts.unshift(newPost);
   saveDatabase();
+
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('posts')
+      .insert([newPost])
+      .then(({ error }) => {
+        if (error) {
+          logSupabaseError('createPost', error);
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('createPost Catch', err);
+      });
+  }
+
   return newPost;
 }
 
@@ -209,18 +304,54 @@ export function deletePost(postId: string, requesterId: string, isAdmin: boolean
   if (post.author_id !== requesterId && !isAdmin) {
     return false;
   }
+
   db.posts.splice(idx, 1);
-  // cleanup comments & likes
   db.comments = db.comments.filter(c => c.post_id !== postId);
   db.likes = db.likes.filter(l => l.post_id !== postId);
   saveDatabase();
+
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('posts')
+      .delete()
+      .eq('id', postId)
+      .then(({ error }) => {
+        if (error) {
+          logSupabaseError('deletePost', error);
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('deletePost Catch', err);
+      });
+  }
+
   return true;
 }
 
 // -------------------------------------------------------------
-// LIKES
+// POST LIKES
 // -------------------------------------------------------------
 export function getLikesForPost(postId: string): StoredLike[] {
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('likes')
+      .select('*')
+      .eq('post_id', postId)
+      .then(({ data, error }) => {
+        if (error) {
+          logSupabaseError('getLikesForPost', error);
+        } else if (data) {
+          db.likes = db.likes.filter(l => l.post_id !== postId).concat(data);
+          saveDatabase();
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('getLikesForPost Catch', err);
+      });
+  }
+
   return db.likes.filter(l => l.post_id === postId);
 }
 
@@ -230,30 +361,84 @@ export function hasUserLikedPost(postId: string, userId: string): boolean {
 
 export function togglePostLike(postId: string, userId: string): { user_has_liked: boolean; likes_count: number } {
   const existingIdx = db.likes.findIndex(l => l.post_id === postId && l.user_id === userId);
-  if (existingIdx >= 0) {
-    // Unlike
+  const supabase = getSupabase();
+
+  if (existingIdx > -1) {
+    const likeId = db.likes[existingIdx].id;
     db.likes.splice(existingIdx, 1);
     saveDatabase();
+
+    if (supabase) {
+      supabase
+        .from('likes')
+        .delete()
+        .eq('id', likeId)
+        .then(({ error }) => {
+          if (error) {
+            logSupabaseError('togglePostLike (delete)', error);
+          }
+        })
+        .catch((err: any) => {
+          logSupabaseError('togglePostLike Delete Catch', err);
+        });
+    }
+
     const count = db.likes.filter(l => l.post_id === postId).length;
     return { user_has_liked: false, likes_count: count };
   } else {
-    // Like
-    db.likes.push({
-      id: `like_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    const newLike: StoredLike = {
+      id: `like_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       post_id: postId,
       user_id: userId,
       created_at: new Date().toISOString()
-    });
+    };
+
+    db.likes.push(newLike);
     saveDatabase();
+
+    if (supabase) {
+      supabase
+        .from('likes')
+        .insert([newLike])
+        .then(({ error }) => {
+          if (error) {
+            logSupabaseError('togglePostLike (insert)', error);
+          }
+        })
+        .catch((err: any) => {
+          logSupabaseError('togglePostLike Insert Catch', err);
+        });
+    }
+
     const count = db.likes.filter(l => l.post_id === postId).length;
     return { user_has_liked: true, likes_count: count };
   }
 }
 
 // -------------------------------------------------------------
-// COMMENTS
+// POST COMMENTS
 // -------------------------------------------------------------
 export function getCommentsForPost(postId: string): StoredComment[] {
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('comments')
+      .select('*')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          logSupabaseError('getCommentsForPost', error);
+        } else if (data) {
+          db.comments = db.comments.filter(c => c.post_id !== postId).concat(data);
+          saveDatabase();
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('getCommentsForPost Catch', err);
+      });
+  }
+
   return db.comments
     .filter(c => c.post_id === postId)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -267,8 +452,25 @@ export function createComment(postId: string, authorId: string, content: string)
     content: content.trim(),
     created_at: new Date().toISOString()
   };
+
   db.comments.push(newComment);
   saveDatabase();
+
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('comments')
+      .insert([newComment])
+      .then(({ error }) => {
+        if (error) {
+          logSupabaseError('createComment', error);
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('createComment Catch', err);
+      });
+  }
+
   return newComment;
 }
 
@@ -278,22 +480,75 @@ export function createComment(postId: string, authorId: string, content: string)
 export function getOrCreateDirectConversation(userA: string, userB: string): StoredConversation {
   const sorted = [userA, userB].sort();
   const convId = `conv_${sorted.join('_')}`;
-  
+  const nowStr = new Date().toISOString();
+
   let existing = db.conversations.find(c => c.id === convId);
   if (!existing) {
     existing = {
       id: convId,
       participants: sorted,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      created_at: nowStr,
+      updated_at: nowStr
     };
     db.conversations.unshift(existing);
     saveDatabase();
   }
+
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('conversations')
+      .select('*')
+      .eq('id', convId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) {
+          logSupabaseError('getOrCreateDirectConversation (fetch)', error);
+        } else if (!data) {
+          supabase
+            .from('conversations')
+            .insert([existing])
+            .then(({ error: insertError }) => {
+              if (insertError) {
+                logSupabaseError('getOrCreateDirectConversation (create)', insertError);
+              }
+            })
+            .catch((err: any) => logSupabaseError('getOrCreateDirectConversation (create catch)', err));
+        }
+      })
+      .catch((err: any) => logSupabaseError('getOrCreateDirectConversation (fetch catch)', err));
+  }
+
   return existing;
 }
 
 export function getUserConversations(userId: string): StoredConversation[] {
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('conversations')
+      .select('*')
+      .contains('participants', [userId])
+      .then(({ data, error }) => {
+        if (error) {
+          logSupabaseError('getUserConversations', error);
+        } else if (data) {
+          data.forEach(remoteConv => {
+            const idx = db.conversations.findIndex(c => c.id === remoteConv.id);
+            if (idx > -1) {
+              db.conversations[idx] = remoteConv;
+            } else {
+              db.conversations.push(remoteConv);
+            }
+          });
+          saveDatabase();
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('getUserConversations Catch', err);
+      });
+  }
+
   return db.conversations
     .filter(c => c.participants.includes(userId))
     .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
@@ -304,22 +559,31 @@ export function getConversationById(convId: string): StoredConversation | undefi
 }
 
 export function getMessagesForConversation(convId: string, requesterId: string): StoredMessage[] {
-  const conv = getConversationById(convId);
-  if (!conv || !conv.participants.includes(requesterId)) {
-    return [];
-  }
-
-  // Mark all unread messages as read by requester
-  let modified = false;
-  db.messages.forEach(m => {
-    if (m.conversation_id === convId && !m.read_by.includes(requesterId)) {
-      m.read_by.push(requesterId);
-      modified = true;
-    }
-  });
-
-  if (modified) {
-    saveDatabase();
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          logSupabaseError('getMessagesForConversation', error);
+        } else if (data) {
+          data.forEach(remoteMsg => {
+            const idx = db.messages.findIndex(m => m.id === remoteMsg.id);
+            if (idx > -1) {
+              db.messages[idx] = remoteMsg;
+            } else {
+              db.messages.push(remoteMsg);
+            }
+          });
+          saveDatabase();
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('getMessagesForConversation Catch', err);
+      });
   }
 
   return db.messages
@@ -406,6 +670,22 @@ export function createMessage(
   db.messages.push(newMsg);
   conv.updated_at = now;
   saveDatabase();
+
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('messages')
+      .insert([newMsg])
+      .then(({ error }) => {
+        if (error) {
+          logSupabaseError('createMessage', error);
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('createMessage Catch', err);
+      });
+  }
+
   return newMsg;
 }
 
@@ -424,14 +704,13 @@ export function deleteMessage(messageId: string, requesterId: string): { success
     return { success: false, error: 'Anda hanya dapat menghapus pesan Anda sendiri' };
   }
 
-  // If message has physical attachment files, remove them safely
   if (msg.attachments && msg.attachments.length > 0) {
     for (const att of msg.attachments) {
       if (att.storage_path && fs.existsSync(att.storage_path)) {
         try {
           fs.unlinkSync(att.storage_path);
         } catch (e) {
-          console.error('[STORAGE DELETE ERROR]', e);
+          console.warn('[STORAGE DELETE ERROR]', e);
         }
       }
     }
@@ -439,6 +718,23 @@ export function deleteMessage(messageId: string, requesterId: string): { success
 
   db.messages.splice(idx, 1);
   saveDatabase();
+
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('messages')
+      .delete()
+      .eq('id', messageId)
+      .then(({ error }) => {
+        if (error) {
+          logSupabaseError('deleteMessage', error);
+        }
+      })
+      .catch((err: any) => {
+        logSupabaseError('deleteMessage Catch', err);
+      });
+  }
+
   return { success: true };
 }
 

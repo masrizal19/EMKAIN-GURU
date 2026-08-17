@@ -240,28 +240,67 @@ export default function ChatScreen({
   // Load all members for new chat selector
   const fetchAllMembersForNewChat = async () => {
     if (isMountedRef.current) setLoadingAllMembers(true);
+    let apiFetchedSuccessfully = false;
     try {
       const token = await getAuthToken();
-      if (!token) {
+      if (token) {
+        const res = await fetch(getApiUrl('/api/community/members'), {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (isMountedRef.current && data.success && Array.isArray(data.members)) {
+            setAllMembers(data.members.filter((m: UserProfile) => m.id !== profile.id));
+            apiFetchedSuccessfully = true;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Backend API failed for chat members list, trying local/Supabase fallback:', err);
+    }
+
+    if (!apiFetchedSuccessfully) {
+      try {
+        const { data: rawProfiles, error } = await supabase
+          .from('profiles')
+          .select('id, username, nama_lengkap, sekolah, mata_pelajaran, kelas, avatar_url, role, status, email, created_at')
+          .neq('id', profile.id);
+
+        if (!error && rawProfiles) {
+          const fallbackMembers: UserProfile[] = rawProfiles.map((p) => {
+            const email = (p.email || '').toLowerCase().trim();
+            const isOfficialAdmin = email === 'admin@gmail.com';
+            const role = isOfficialAdmin ? 'admin' : (p.role || 'guru');
+
+            return {
+              id: p.id,
+              username: p.username || (email ? email.split('@')[0] : `user_${p.id.substring(0, 5)}`),
+              nama_lengkap: p.nama_lengkap || 'Anggota EMKAIN',
+              avatar_url: p.avatar_url || (role === 'admin' ? '🛡️' : '👩‍🏫'),
+              role: role as 'admin' | 'guru',
+              status: p.status || 'aktif',
+              sekolah: p.sekolah || 'SMK Multi Karya',
+              mata_pelajaran: p.mata_pelajaran || '',
+              kelas: p.kelas || '',
+              email: email,
+              is_online: false,
+              last_seen_at: null,
+              created_at: p.created_at
+            };
+          });
+          if (isMountedRef.current) {
+            setAllMembers(fallbackMembers);
+          }
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback chat members query failed:', fallbackErr);
+      } finally {
         if (isMountedRef.current) setLoadingAllMembers(false);
-        return;
       }
-
-      const res = await fetch(getApiUrl('/api/community/members'), {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (isMountedRef.current && data.success && Array.isArray(data.members)) {
-          setAllMembers(data.members.filter((m: UserProfile) => m.id !== profile.id));
-        }
-      }
-    } catch {
-      // Gracefully catch
-    } finally {
+    } else {
       if (isMountedRef.current) setLoadingAllMembers(false);
     }
   };
