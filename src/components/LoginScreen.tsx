@@ -255,9 +255,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
           {!isSupabaseConfigured && (
             <div className="mb-6 p-4 bg-[#FFD166] neo-border text-xs font-bold rounded-xl space-y-1.5 text-gray-900" id="login-config-warning">
-              <div className="font-extrabold text-[13px] uppercase">⚠️ KONFIGURASI SUPABASE BELUM SELESAI</div>
+              <div className="font-extrabold text-[13px] uppercase">⚠️ KONFIGURASI BELUM LENGKAP</div>
               <p className="font-medium text-gray-800 leading-normal">
-                Silakan isi variabel lingkungan <strong className="font-extrabold text-black">VITE_SUPABASE_URL</strong> dan <strong className="font-extrabold text-black">VITE_SUPABASE_PUBLISHABLE_KEY</strong> di menu Settings sebelum memulai agar autentikasi berjalan dengan normal.
+                Konfigurasi Supabase production belum tersedia.
               </p>
             </div>
           )}
