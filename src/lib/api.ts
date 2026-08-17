@@ -1,5 +1,7 @@
+/// <reference types="vite/client" />
+
 export const getApiUrl = (path: string): string => {
-  const baseUrl = (import.meta as any).env.VITE_API_URL || '';
+  const baseUrl = import.meta.env.VITE_API_URL || '';
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   // If baseUrl ends with '/' and cleanPath starts with '/', join them without double slashes
   if (baseUrl.endsWith('/') && cleanPath.startsWith('/')) {

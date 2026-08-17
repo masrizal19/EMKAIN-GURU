@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/// <reference types="vite/client" />
+
 import { createClient } from '@supabase/supabase-js';
 
-const rawUrl = (import.meta as any).env.VITE_SUPABASE_URL;
-const rawKey = (import.meta as any).env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const rawUrl = import.meta.env.VITE_SUPABASE_URL;
+const rawKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 console.log('[SUPABASE CONFIG]', {
   hasUrl: Boolean(rawUrl),

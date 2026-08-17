@@ -43,7 +43,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setError('');
     
     if (!isSupabaseConfigured) {
-      setError('Konfigurasi Supabase tidak tersedia. Silakan isi VITE_SUPABASE_URL dan VITE_SUPABASE_PUBLISHABLE_KEY pada pengaturan proyek atau GitHub Secrets.');
+      setError('Konfigurasi Supabase production belum tersedia.');
       console.error('[ENV ERROR] Supabase environment variables are not loaded in the client-side bundle.');
       return;
     }
