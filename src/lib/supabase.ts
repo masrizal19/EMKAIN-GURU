@@ -8,6 +8,11 @@ import { createClient } from '@supabase/supabase-js';
 const rawUrl = (import.meta as any).env.VITE_SUPABASE_URL;
 const rawKey = (import.meta as any).env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+console.log('[SUPABASE CONFIG]', {
+  hasUrl: Boolean(rawUrl),
+  hasKey: Boolean(rawKey),
+});
+
 export const isSupabaseConfigured = !!(rawUrl && rawKey);
 
 function sanitizeSupabaseUrl(url: string): string {
