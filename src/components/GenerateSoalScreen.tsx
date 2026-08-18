@@ -31,6 +31,11 @@ export default function GenerateSoalScreen({
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.MEDIUM);
   const [quantity, setQuantity] = useState<number>(15);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredSubjects = SUBJECTS.filter((subject) =>
+    subject.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,7 +84,12 @@ export default function GenerateSoalScreen({
           <div className="relative">
             <button
               type="button"
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              onClick={() => {
+                setIsDropdownOpen(!isDropdownOpen);
+                if (!isDropdownOpen) {
+                  setSearchQuery('');
+                }
+              }}
               className="w-full px-4 py-4 bg-white neo-border rounded-xl font-bold text-sm text-left text-gray-900 flex justify-between items-center cursor-pointer hover:bg-gray-50 focus:outline-none"
               id="subject-dropdown-trigger"
             >
@@ -88,22 +98,48 @@ export default function GenerateSoalScreen({
             </button>
             
             {isDropdownOpen && (
-              <div className="absolute top-[105%] left-0 w-full bg-white neo-border rounded-xl z-30 shadow-lg max-h-56 overflow-y-auto" id="subject-dropdown-list">
-                {SUBJECTS.map((subject) => (
-                  <button
-                    key={subject}
-                    type="button"
-                    onClick={() => {
-                      setSelectedSubject(subject);
-                      setIsDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-4 py-3 text-sm font-bold hover:bg-[#FF8B7B]/20 transition-all ${
-                      selectedSubject === subject ? 'bg-[#FF8B7B]/10 font-black' : ''
-                    }`}
-                  >
-                    {subject}
-                  </button>
-                ))}
+              <div 
+                className="absolute top-[105%] left-0 w-full bg-white neo-border rounded-xl z-30 shadow-lg max-h-80 flex flex-col overflow-hidden" 
+                id="subject-dropdown-list"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Search input for filterability */}
+                <div className="p-3 border-b border-gray-100 bg-gray-50 flex items-center gap-2" id="subject-search-container">
+                  <input
+                    type="text"
+                    placeholder="Cari mata pelajaran..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg font-bold text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-[#FF8B7B] focus:border-[#FF8B7B]"
+                    id="subject-search-input"
+                    autoFocus
+                  />
+                </div>
+                {/* Filtered items list */}
+                <div className="overflow-y-auto max-h-56 flex-1" id="subject-scrollable-area">
+                  {filteredSubjects.length > 0 ? (
+                    filteredSubjects.map((subject) => (
+                      <button
+                        key={subject}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSubject(subject);
+                          setIsDropdownOpen(false);
+                          setSearchQuery('');
+                        }}
+                        className={`w-full text-left px-4 py-3 text-sm font-bold hover:bg-[#FF8B7B]/20 transition-all ${
+                          selectedSubject === subject ? 'bg-[#FF8B7B]/10 font-black' : ''
+                        }`}
+                      >
+                        {subject}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-4 text-xs font-black text-gray-400 text-center uppercase tracking-wide">
+                      Mata Pelajaran Tidak Ditemukan
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

@@ -364,22 +364,44 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
 
       console.log('[DELETE USER DEBUG] target user id:', deletingTeacher.id, 'target email:', deletingTeacher.email);
 
-      const response = await fetch(getApiUrl('/api/admin/delete-user'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          userId: deletingTeacher.id
-        })
-      });
+      let responseOk = false;
+      let resData: any = null;
 
-      const resData = await response.json();
+      try {
+        console.log('[DELETE USER DEBUG] Attempting to invoke Supabase Edge Function "delete-user"...');
+        const { data: funcData, error: funcError } = await supabase.functions.invoke('delete-user', {
+          body: { userId: deletingTeacher.id }
+        });
 
-      if (!response.ok) {
+        if (funcError) {
+          console.warn('[DELETE USER DEBUG] Edge Function invocation warning/error:', funcError);
+          throw funcError;
+        }
+
+        console.log('[DELETE USER DEBUG] Edge Function invoked successfully:', funcData);
+        responseOk = true;
+        resData = funcData;
+      } catch (edgeErr: any) {
+        console.warn('[DELETE USER DEBUG] Edge Function failed/not found, falling back to Express API...', edgeErr);
+        
+        const response = await fetch(getApiUrl('/api/admin/delete-user'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            userId: deletingTeacher.id
+          })
+        });
+
+        resData = await response.json();
+        responseOk = response.ok;
+      }
+
+      if (!responseOk) {
         console.error('[DELETE USER ERROR]', resData);
-        const errMsg = resData.error?.message || resData.message || 'Gagal menghapus akun guru.';
+        const errMsg = resData?.error?.message || resData?.message || 'Gagal menghapus akun guru.';
         setDeleteError(errMsg);
       } else {
         setDeletingTeacher(null);
