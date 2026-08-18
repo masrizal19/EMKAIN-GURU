@@ -14,7 +14,8 @@ import {
   fetchMessagesDirect,
   startDirectConversationDirect,
   sendMessageDirect,
-  deleteMessageDirect
+  deleteMessageDirect,
+  mapProfile
 } from '../lib/supabase_store';
 import UserProfileModal from './UserProfileModal';
 import ChatMessageItem from './chat/ChatMessageItem';
@@ -82,6 +83,61 @@ export default function ChatScreen({
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+    };
+  }, []);
+
+  // Realtime subscription to profiles table to receive online presence updates dynamically
+  useEffect(() => {
+    const channel = supabase
+      .channel('public:profiles_presence_chat')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles' },
+        (payload) => {
+          const updatedProfile = payload.new;
+          const mapped = mapProfile(updatedProfile);
+
+          if (!isMountedRef.current) return;
+
+          // 1. Update selectedConversation if it belongs to the updated user
+          setSelectedConversation(prev => {
+            if (prev && prev.other_user?.id === mapped.id) {
+              return {
+                ...prev,
+                other_user: mapped
+              };
+            }
+            return prev;
+          });
+
+          // 2. Update conversations list other_user
+          setConversations(prev => {
+            return prev.map(c => {
+              if (c.other_user?.id === mapped.id) {
+                return {
+                  ...c,
+                  other_user: mapped
+                };
+              }
+              return c;
+            });
+          });
+
+          // 3. Update allMembers list
+          setAllMembers(prev => {
+            return prev.map(m => {
+              if (m.id === mapped.id) {
+                return mapped;
+              }
+              return m;
+            });
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
     };
   }, []);
 

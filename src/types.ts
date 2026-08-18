@@ -49,6 +49,8 @@ export interface UserProfile {
   updated_at?: string;
   is_online?: boolean;
   last_seen_at?: string | null;
+  online_status?: boolean;
+  last_seen?: string | null;
 }
 
 export interface Question {

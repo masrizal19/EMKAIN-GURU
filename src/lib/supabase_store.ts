@@ -15,10 +15,21 @@ export const isProductionStaticBuild = (): boolean => {
 };
 
 // Map raw Supabase profiles to frontend UserProfile
-function mapProfile(p: any): UserProfile {
+export function isUserOnline(onlineStatus: boolean | undefined, lastSeen: string | Date | null | undefined): boolean {
+  if (!onlineStatus) return false;
+  if (!lastSeen) return false;
+  const lastSeenTime = new Date(lastSeen).getTime();
+  const timeDifference = Date.now() - lastSeenTime;
+  return timeDifference < 75000; // 75 seconds timeout fallback
+}
+
+export function mapProfile(p: any): UserProfile {
   const email = (p.email || '').toLowerCase().trim();
   const isOfficialAdmin = email === 'admin@gmail.com' || p.role === 'admin';
   const role = isOfficialAdmin ? 'admin' : (p.role || 'guru');
+
+  const lastSeenVal = p.last_seen || p.last_seen_at || null;
+  const isOnline = isUserOnline(p.online_status, lastSeenVal);
 
   return {
     id: p.id,
@@ -31,10 +42,31 @@ function mapProfile(p: any): UserProfile {
     mata_pelajaran: p.mata_pelajaran || '',
     kelas: p.kelas || '',
     email: email,
-    is_online: false, // Updated dynamically
-    last_seen_at: null,
+    is_online: isOnline,
+    last_seen_at: lastSeenVal ? new Date(lastSeenVal).toISOString() : null,
+    online_status: !!p.online_status,
+    last_seen: lastSeenVal ? new Date(lastSeenVal).toISOString() : null,
     created_at: p.created_at
   };
+}
+
+/**
+ * Update current user's presence status in Supabase profiles.
+ * Works dynamically in both development and production.
+ */
+export async function updatePresenceDirect(userId: string, isOnline: boolean): Promise<void> {
+  try {
+    const payload = {
+      online_status: isOnline,
+      last_seen: new Date().toISOString()
+    };
+    await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', userId);
+  } catch (err) {
+    console.error('[SUPABASE_STORE] updatePresenceDirect error:', err);
+  }
 }
 
 // -------------------------------------------------------------

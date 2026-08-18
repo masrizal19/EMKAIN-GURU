@@ -222,6 +222,25 @@ export function updateUserPresence(userId: string, isOnline: boolean = true) {
     lastSeenAt: Date.now(),
     isOnline
   });
+
+  const supabase = getSupabase();
+  if (supabase) {
+    supabase
+      .from('profiles')
+      .update({
+        online_status: isOnline,
+        last_seen: new Date().toISOString()
+      })
+      .eq('id', userId)
+      .then(({ error }: any) => {
+        if (error) {
+          console.error('[SUPABASE_STORE] Error updating user presence on heartbeat:', error);
+        }
+      })
+      .catch((err: any) => {
+        console.error('[SUPABASE_STORE] Catch error updating user presence:', err);
+      });
+  }
 }
 
 export function getUserPresence(userId: string): { is_online: boolean; last_seen_at: string | null } {
@@ -229,7 +248,7 @@ export function getUserPresence(userId: string): { is_online: boolean; last_seen
   if (!p) {
     return { is_online: false, last_seen_at: null };
   }
-  const isRecent = (Date.now() - p.lastSeenAt) < 65000;
+  const isRecent = (Date.now() - p.lastSeenAt) < 75000;
   return {
     is_online: p.isOnline && isRecent,
     last_seen_at: new Date(p.lastSeenAt).toISOString()

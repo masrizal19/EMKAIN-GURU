@@ -15,7 +15,8 @@ import {
   deletePostDirect,
   togglePostLikeDirect,
   fetchCommentsDirect,
-  createCommentDirect
+  createCommentDirect,
+  mapProfile
 } from '../lib/supabase_store';
 import UserProfileModal from './UserProfileModal';
 import {
@@ -300,6 +301,48 @@ export default function CommunityScreen({
     }, 10000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  // Realtime subscription to profiles table to receive online presence updates dynamically
+  useEffect(() => {
+    const channel = supabase
+      .channel('public:profiles_presence_community')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles' },
+        (payload) => {
+          const updatedProfile = payload.new;
+          const mapped = mapProfile(updatedProfile);
+
+          // 1. Update members list
+          setMembers(prev => {
+            return prev.map(m => {
+              if (m.id === mapped.id) {
+                return mapped;
+              }
+              return m;
+            });
+          });
+
+          // 2. Update posts list author_profile
+          setPosts(prev => {
+            return prev.map(p => {
+              if (p.author_profile && p.author_profile.id === mapped.id) {
+                return {
+                  ...p,
+                  author_profile: mapped
+                };
+              }
+              return p;
+            });
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Handle Post Creation

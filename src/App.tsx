@@ -8,7 +8,7 @@ import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { AppScreen, Difficulty, QuestionType, GeneratedSet, RecentWork, UserProfile } from './types';
 import { INITIAL_RECENT_WORKS, SAMPLE_QUESTION_SETS, generateQuestions } from './data';
 import { getApiUrl } from './lib/api';
-import { isProductionStaticBuild } from './lib/supabase_store';
+import { isProductionStaticBuild, updatePresenceDirect } from './lib/supabase_store';
 
 // Import Screens
 import LoginScreen from './components/LoginScreen';
@@ -277,6 +277,7 @@ export default function App() {
 
         if (activeSession?.user) {
           const prof = await fetchUserProfile(activeSession.user.id);
+          await updatePresenceDirect(activeSession.user.id, true);
           handleHashRouting(prof, activeSession);
         } else {
           setProfile(null);
@@ -296,6 +297,7 @@ export default function App() {
       setSession(newSession);
       if (newSession?.user) {
         const prof = await fetchUserProfile(newSession.user.id);
+        await updatePresenceDirect(newSession.user.id, true);
         handleHashRouting(prof, newSession);
       } else {
         setProfile(null);
@@ -325,12 +327,20 @@ export default function App() {
 
     const pingHeartbeat = async () => {
       try {
-        if (isProductionStaticBuild()) {
-          // No Express backend in static build, skip pinging local endpoints
-          return;
-        }
         const { data: { session: s } } = await supabase.auth.getSession();
-        if (s?.access_token) {
+        if (!s?.user?.id) return;
+
+        // 1. Direct update to Supabase (Unified status/last_seen for both Dev & Production)
+        await supabase
+          .from('profiles')
+          .update({
+            online_status: true,
+            last_seen: new Date().toISOString()
+          })
+          .eq('id', s.user.id);
+
+        // 2. Local backend update (if in dev/local mode with Express)
+        if (!isProductionStaticBuild() && s?.access_token) {
           await fetch(getApiUrl('/api/community/heartbeat'), {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${s.access_token}` }
@@ -399,14 +409,23 @@ export default function App() {
   // Handle logout
   const handleLogout = async () => {
     try {
-      if (!isProductionStaticBuild()) {
-        const { data: { session: s } } = await supabase.auth.getSession();
-        if (s?.access_token) {
-          await fetch(getApiUrl('/api/community/presence-offline'), {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${s.access_token}` }
-          });
-        }
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (s?.user?.id) {
+        // Direct update to Supabase to mark user as OFFLINE
+        await supabase
+          .from('profiles')
+          .update({
+            online_status: false,
+            last_seen: new Date().toISOString()
+          })
+          .eq('id', s.user.id);
+      }
+
+      if (!isProductionStaticBuild() && s?.access_token) {
+        await fetch(getApiUrl('/api/community/presence-offline'), {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${s.access_token}` }
+        });
       }
     } catch (e) {
       // ignore
