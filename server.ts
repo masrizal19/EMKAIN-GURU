@@ -530,10 +530,102 @@ async function handleDeleteUser(req: any, res: any): Promise<any> {
 
     console.log('[DELETE USER DEBUG] admin user id:', adminUser.id, 'target user id:', targetUserId, 'target email:', targetAuthUser.user.email);
 
-    // Delete profile record first
-    await adminClient.from('profiles').delete().eq('id', targetUserId);
+    console.log('[DELETE USER FLOW] Starting cascading deletion for user:', targetUserId);
 
-    // Delete Auth User
+    // 1. Delete likes created by the target user
+    const { error: errLikes } = await adminClient
+      .from('likes')
+      .delete()
+      .eq('user_id', targetUserId);
+    if (errLikes) console.warn('[DELETE USER FLOW] Warning deleting user likes:', errLikes.message);
+
+    // 2. Delete comments created by the target user
+    const { error: errComments } = await adminClient
+      .from('comments')
+      .delete()
+      .eq('author_id', targetUserId);
+    if (errComments) console.warn('[DELETE USER FLOW] Warning deleting user comments:', errComments.message);
+
+    // 3. Find posts created by the target user and delete their likes and comments
+    const { data: userPosts, error: errFetchPosts } = await adminClient
+      .from('posts')
+      .select('id')
+      .eq('author_id', targetUserId);
+
+    if (userPosts && userPosts.length > 0) {
+      const postIds = userPosts.map(p => p.id);
+      
+      // Delete likes on these posts
+      const { error: errLikesOnPosts } = await adminClient
+        .from('likes')
+        .delete()
+        .in('post_id', postIds);
+      if (errLikesOnPosts) console.warn('[DELETE USER FLOW] Warning deleting likes on user posts:', errLikesOnPosts.message);
+
+      // Delete comments on these posts
+      const { error: errCommentsOnPosts } = await adminClient
+        .from('comments')
+        .delete()
+        .in('post_id', postIds);
+      if (errCommentsOnPosts) console.warn('[DELETE USER FLOW] Warning deleting comments on user posts:', errCommentsOnPosts.message);
+
+      // Delete the posts themselves
+      const { error: errDeletePosts } = await adminClient
+        .from('posts')
+        .delete()
+        .in('id', postIds);
+      if (errDeletePosts) console.warn('[DELETE USER FLOW] Warning deleting user posts:', errDeletePosts.message);
+    }
+
+    // 4. Find all conversations involving this user
+    const { data: userConvs, error: errFetchConvs } = await adminClient
+      .from('conversations')
+      .select('id')
+      .or(`user1_id.eq.${targetUserId},user2_id.eq.${targetUserId}`);
+
+    if (userConvs && userConvs.length > 0) {
+      const convIds = userConvs.map(c => c.id);
+
+      // Delete all messages inside those conversations first
+      const { error: errDeleteMessagesInConvs } = await adminClient
+        .from('messages')
+        .delete()
+        .in('conversation_id', convIds);
+      if (errDeleteMessagesInConvs) console.warn('[DELETE USER FLOW] Warning deleting messages in user conversations:', errDeleteMessagesInConvs.message);
+
+      // Delete those conversations
+      const { error: errDeleteConvs } = await adminClient
+        .from('conversations')
+        .delete()
+        .in('id', convIds);
+      if (errDeleteConvs) console.warn('[DELETE USER FLOW] Warning deleting user conversations:', errDeleteConvs.message);
+    }
+
+    // 5. Delete any remaining messages sent by this user (just in case they exist outside the tracked conversations)
+    const { error: errMessages } = await adminClient
+      .from('messages')
+      .delete()
+      .eq('sender_id', targetUserId);
+    if (errMessages) console.warn('[DELETE USER FLOW] Warning deleting user messages:', errMessages.message);
+
+    // 6. Delete profile record
+    const { error: deleteProfileError } = await adminClient
+      .from('profiles')
+      .delete()
+      .eq('id', targetUserId);
+
+    if (deleteProfileError) {
+      console.error('[DELETE USER FLOW] Error deleting profile row:', deleteProfileError.message);
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'DELETE_PROFILE_FAILED',
+          message: deleteProfileError.message || 'Gagal menghapus profil dari database.'
+        }
+      });
+    }
+
+    // 7. Finally, delete the Auth User from Supabase Authentication
     const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(targetUserId);
     if (deleteAuthError) {
       console.error('[DELETE USER ERROR] Supabase admin delete failed:', deleteAuthError.message);
