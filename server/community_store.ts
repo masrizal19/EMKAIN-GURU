@@ -49,7 +49,7 @@ export interface StoredMessage {
   conversation_id: string;
   sender_id: string;
   message: string;
-  message_type?: 'text' | 'file' | 'image' | 'video' | 'audio' | 'link';
+  message_type?: 'text' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'retracted';
   attachment_url?: string;
   attachment_name?: string;
   attachment_size?: number;
@@ -712,6 +712,27 @@ export function getMessageById(messageId: string): StoredMessage | undefined {
   return db.messages.find(m => m.id === messageId);
 }
 
+export function markConversationMessagesAsRead(convId: string, userId: string): void {
+  let changed = false;
+  db.messages.forEach(m => {
+    if (m.conversation_id === convId && m.sender_id !== userId && !m.read_by.includes(userId)) {
+      m.read_by.push(userId);
+      changed = true;
+      const supabase = getSupabase();
+      if (supabase) {
+        supabase
+          .from('messages')
+          .update({ read_by: m.read_by })
+          .eq('id', m.id)
+          .then();
+      }
+    }
+  });
+  if (changed) {
+    saveDatabase();
+  }
+}
+
 export function deleteMessage(messageId: string, requesterId: string): { success: boolean; error?: string } {
   const idx = db.messages.findIndex(m => m.id === messageId);
   if (idx === -1) {
@@ -720,9 +741,10 @@ export function deleteMessage(messageId: string, requesterId: string): { success
 
   const msg = db.messages[idx];
   if (msg.sender_id !== requesterId) {
-    return { success: false, error: 'Anda hanya dapat menghapus pesan Anda sendiri' };
+    return { success: false, error: 'Anda hanya dapat menarik pesan Anda sendiri' };
   }
 
+  // Delete physical files from disk
   if (msg.attachments && msg.attachments.length > 0) {
     for (const att of msg.attachments) {
       if (att.storage_path && fs.existsSync(att.storage_path)) {
@@ -735,22 +757,43 @@ export function deleteMessage(messageId: string, requesterId: string): { success
     }
   }
 
-  db.messages.splice(idx, 1);
+  // Transform message to retracted state in-place so both users see retraction notice
+  msg.message_type = 'retracted' as any;
+  msg.message = '';
+  msg.attachment_url = undefined;
+  msg.attachment_name = undefined;
+  msg.attachment_size = undefined;
+  msg.attachment_mime_type = undefined;
+  msg.link_url = undefined;
+  msg.link_title = undefined;
+  msg.link_description = undefined;
+  msg.attachments = [];
   saveDatabase();
 
   const supabase = getSupabase();
   if (supabase) {
     supabase
       .from('messages')
-      .delete()
+      .update({
+        message_type: 'retracted',
+        message: '',
+        attachment_url: null,
+        attachment_name: null,
+        attachment_size: null,
+        attachment_mime_type: null,
+        link_url: null,
+        link_title: null,
+        link_description: null
+      })
       .eq('id', messageId)
+      .eq('sender_id', requesterId)
       .then(({ error }) => {
         if (error) {
-          logSupabaseError('deleteMessage', error);
+          logSupabaseError('retractMessage Supabase update', error);
         }
       })
       .catch((err: any) => {
-        logSupabaseError('deleteMessage Catch', err);
+        logSupabaseError('retractMessage Catch', err);
       });
   }
 

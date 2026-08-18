@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserProfile, Conversation, ChatMessage, ChatAttachment } from '../types';
 import { getApiUrl } from '../lib/api';
@@ -14,7 +14,10 @@ import {
   fetchMessagesDirect,
   startDirectConversationDirect,
   sendMessageDirect,
+  retractMessageDirect,
   deleteMessageDirect,
+  uploadChatFileToStorage,
+  markMessagesAsReadDirect,
   mapProfile
 } from '../lib/supabase_store';
 import UserProfileModal from './UserProfileModal';
@@ -34,7 +37,8 @@ import {
   Paperclip,
   X,
   UploadCloud,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 
 interface ChatScreenProps {
@@ -56,7 +60,16 @@ export default function ChatScreen({
   const [loadingConvs, setLoadingConvs] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sendingMsg, setSendingMsg] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Typing & Uploading Indicator State
+  const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
+  const [isOtherUserUploading, setIsOtherUserUploading] = useState(false);
+  const typingTimeoutRef = useRef<any>(null);
+  const uploadingTimeoutRef = useRef<any>(null);
+  const realtimeChannelRef = useRef<any>(null);
+  const lastTypingBroadcastRef = useRef<number>(0);
 
   // Attachment & Composer State
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
@@ -86,7 +99,7 @@ export default function ChatScreen({
     };
   }, []);
 
-  // Realtime subscription to profiles table to receive online presence updates dynamically
+  // Realtime subscription to profiles table for online presence
   useEffect(() => {
     const channel = supabase
       .channel('public:profiles_presence_chat')
@@ -428,21 +441,223 @@ export default function ChatScreen({
     return () => clearInterval(interval);
   }, []);
 
-  // Sync messages when selected conversation changes
-  useEffect(() => {
-    if (selectedConversation) {
-      fetchMessages(selectedConversation.id);
-      const msgInterval = setInterval(() => {
-        fetchMessages(selectedConversation.id, true);
-      }, 3000);
-      return () => clearInterval(msgInterval);
+  // Helper to parse a raw Supabase messages row into ChatMessage
+  const parseRawMessage = useCallback((m: any): ChatMessage => {
+    if (m.message_type === 'retracted' || m.is_deleted) {
+      return {
+        id: m.id,
+        conversation_id: m.conversation_id,
+        sender_id: m.sender_id,
+        message: '',
+        message_type: 'retracted',
+        attachment_url: null,
+        attachments: [],
+        link_url: null,
+        created_at: m.created_at,
+        read_by: m.read_by || [m.sender_id],
+        is_deleted: true,
+        sender_profile: m.sender_profile || null
+      };
     }
-  }, [selectedConversation?.id]);
+
+    let attachmentsList: ChatAttachment[] = [];
+    if (m.attachment_url) {
+      if (m.attachment_url.startsWith('[') || m.attachment_url.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(m.attachment_url);
+          attachmentsList = Array.isArray(parsed) ? parsed : [parsed];
+        } catch {
+          attachmentsList = [{
+            id: `att_${m.id}`,
+            name: m.attachment_name || 'Berkas',
+            size: m.attachment_size || 0,
+            mime_type: m.attachment_mime_type || 'application/octet-stream',
+            url: m.attachment_url,
+            file_category: (m.message_type as any) || 'other'
+          }];
+        }
+      } else {
+        attachmentsList = [{
+          id: `att_${m.id}`,
+          name: m.attachment_name || 'Berkas',
+          size: m.attachment_size || 0,
+          mime_type: m.attachment_mime_type || 'application/octet-stream',
+          url: m.attachment_url,
+          file_category: (m.message_type as any) || 'other'
+        }];
+      }
+    }
+
+    return {
+      id: m.id,
+      conversation_id: m.conversation_id,
+      sender_id: m.sender_id,
+      message: m.message || '',
+      message_type: m.message_type || 'text',
+      attachment_url: m.attachment_url,
+      attachment_name: m.attachment_name,
+      attachment_size: m.attachment_size,
+      attachment_mime_type: m.attachment_mime_type,
+      link_url: m.link_url,
+      link_title: m.link_title,
+      link_description: m.link_description,
+      attachments: attachmentsList,
+      created_at: m.created_at,
+      read_by: m.read_by || [m.sender_id],
+      is_deleted: false,
+      sender_profile: m.sender_profile || null
+    };
+  }, []);
+
+  // Supabase Realtime Channel for Active Conversation (Messages, Read Receipts, Typing, Uploading)
+  useEffect(() => {
+    if (!selectedConversation) {
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      return;
+    }
+
+    const convId = selectedConversation.id;
+    fetchMessages(convId);
+
+    // Initial mark as read
+    markMessagesAsReadDirect(convId, profile.id);
+
+    // Create Realtime channel
+    const channel = supabase.channel(`chat_conv_${convId}`, {
+      config: {
+        broadcast: { ack: true }
+      }
+    });
+
+    realtimeChannelRef.current = channel;
+
+    channel
+      // 1. Listen for new messages inserted in database
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${convId}`
+        },
+        (payload) => {
+          const newRow = payload.new;
+          if (newRow && isMountedRef.current) {
+            const parsed = parseRawMessage(newRow);
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === parsed.id)) return prev;
+              return [...prev, parsed];
+            });
+
+            // If message was sent by other user, automatically mark as read!
+            if (newRow.sender_id !== profile.id) {
+              markMessagesAsReadDirect(convId, profile.id);
+            }
+            fetchConversations(true);
+          }
+        }
+      )
+      // 2. Listen for message updates (Read receipts, retracting message)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${convId}`
+        },
+        (payload) => {
+          const updatedRow = payload.new;
+          if (updatedRow && isMountedRef.current) {
+            const parsed = parseRawMessage(updatedRow);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === parsed.id ? parsed : m))
+            );
+            fetchConversations(true);
+          }
+        }
+      )
+      // 3. Listen for message deletions
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${convId}`
+        },
+        (payload) => {
+          const oldRow = payload.old;
+          if (oldRow && isMountedRef.current) {
+            setMessages((prev) => prev.filter((m) => m.id !== oldRow.id));
+            fetchConversations(true);
+          }
+        }
+      )
+      // 4. Realtime Broadcast: Typing indicator
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (!isMountedRef.current) return;
+        if (payload && payload.userId !== profile.id) {
+          setIsOtherUserTyping(true);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current) setIsOtherUserTyping(false);
+          }, 3000);
+        }
+      })
+      // 5. Realtime Broadcast: Uploading indicator
+      .on('broadcast', { event: 'uploading' }, ({ payload }) => {
+        if (!isMountedRef.current) return;
+        if (payload && payload.userId !== profile.id) {
+          setIsOtherUserUploading(payload.isUploading);
+          if (uploadingTimeoutRef.current) clearTimeout(uploadingTimeoutRef.current);
+          if (payload.isUploading) {
+            uploadingTimeoutRef.current = setTimeout(() => {
+              if (isMountedRef.current) setIsOtherUserUploading(false);
+            }, 10000);
+          }
+        }
+      })
+      .subscribe();
+
+    // Fallback polling interval to guarantee freshness
+    const msgInterval = setInterval(() => {
+      fetchMessages(convId, true);
+    }, 3000);
+
+    return () => {
+      clearInterval(msgInterval);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (uploadingTimeoutRef.current) clearTimeout(uploadingTimeoutRef.current);
+      supabase.removeChannel(channel);
+      realtimeChannelRef.current = null;
+    };
+  }, [selectedConversation?.id, profile.id, parseRawMessage]);
 
   // Scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isOtherUserTyping, isOtherUserUploading]);
+
+  // Handle typing broadcast on input change
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+
+    const now = Date.now();
+    if (now - lastTypingBroadcastRef.current > 1500 && realtimeChannelRef.current) {
+      lastTypingBroadcastRef.current = now;
+      realtimeChannelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId: profile.id, isTyping: true }
+      }).catch(() => {});
+    }
+  };
 
   // Send message (Handles Text, Files Upload, and Link)
   const handleSendMessage = async (e?: React.FormEvent) => {
@@ -458,117 +673,56 @@ export default function ChatScreen({
     setSendingMsg(true);
     setErrorMessage(null);
 
+    // Broadcast uploading status
+    if (hasFiles && realtimeChannelRef.current) {
+      setUploadProgressText('Sedang mengunggah berkas ke penyimpanan aman...');
+      realtimeChannelRef.current.send({
+        type: 'broadcast',
+        event: 'uploading',
+        payload: { userId: profile.id, isUploading: true }
+      }).catch(() => {});
+    }
+
     try {
-      if (isProductionStaticBuild()) {
-        let uploadedAttachments: ChatAttachment[] = [];
-
-        if (hasFiles) {
-          for (const p of pendingFiles) {
-            const fileExt = p.file.name.split('.').pop();
-            const filePath = `chat/${selectedConversation.id}/${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-            
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('messages')
-              .upload(filePath, p.file, { cacheControl: '3600', upsert: true });
-
-            if (!uploadError && uploadData) {
-              const { data: { publicUrl } } = supabase.storage
-                .from('messages')
-                .getPublicUrl(filePath);
-
-              uploadedAttachments.push({
-                id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                name: p.file.name,
-                size: p.file.size,
-                mime_type: p.file.type,
-                url: publicUrl,
-                file_category: p.category
-              });
-            } else {
-              const reader = new FileReader();
-              const base64Promise = new Promise<string>((resolve) => {
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.readAsDataURL(p.file);
-              });
-              const dataUrl = await base64Promise;
-
-              uploadedAttachments.push({
-                id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                name: p.file.name,
-                size: p.file.size,
-                mime_type: p.file.type,
-                url: dataUrl,
-                file_category: p.category
-              });
-            }
-          }
-        }
-
-        let finalType: 'text' | 'file' | 'image' | 'video' | 'audio' | 'link' = 'text';
-        if (uploadedAttachments.length > 0) {
-          const firstCat = uploadedAttachments[0].file_category;
-          if (firstCat === 'image') finalType = 'image';
-          else if (firstCat === 'video') finalType = 'video';
-          else if (firstCat === 'audio') finalType = 'audio';
-          else finalType = 'file';
-        } else if (hasLink) {
-          finalType = 'link';
-        }
-
-        const msgPayload = {
-          message: messageText,
-          message_type: finalType,
-          attachments: uploadedAttachments,
-          link_url: pendingLink?.url,
-          link_title: pendingLink?.title,
-          link_description: pendingLink?.description
-        };
-
-        const newMsg = await sendMessageDirect(selectedConversation.id, profile.id, msgPayload);
-        if (isMountedRef.current) {
-          setMessages((prev) => [...prev, newMsg]);
-          setInputText('');
-          setPendingFiles([]);
-          setPendingLink(null);
-          setIsAttachmentMenuOpen(false);
-          fetchConversations(true);
-        }
-        setSendingMsg(false);
-        return;
-      }
-
-      const token = await getAuthToken();
-      if (!token) {
-        setErrorMessage('Sesi telah berakhir. Silakan muat ulang halaman.');
-        return;
-      }
-
       let uploadedAttachments: ChatAttachment[] = [];
 
-      // 1. Upload files first if any
+      // 1. Upload pending files to Supabase Storage 'chat-attachments' bucket
       if (hasFiles) {
-        const formData = new FormData();
-        formData.append('conversationId', selectedConversation.id);
-        pendingFiles.forEach((p) => {
-          formData.append('files', p.file);
-        });
+        for (let i = 0; i < pendingFiles.length; i++) {
+          const p = pendingFiles[i];
+          setUploadProgressText(`Mengunggah berkas (${i + 1}/${pendingFiles.length}): ${p.file.name}...`);
 
-        const uploadRes = await fetch(getApiUrl('/api/chat/upload'), {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          },
-          body: formData
-        });
+          try {
+            const uploadRes = await uploadChatFileToStorage(p.file, selectedConversation.id);
+            uploadedAttachments.push({
+              id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              name: uploadRes.name,
+              size: uploadRes.size,
+              mime_type: uploadRes.mimeType,
+              url: uploadRes.url,
+              storage_path: uploadRes.storagePath,
+              file_category: p.category,
+              download_url: uploadRes.url
+            });
+          } catch (uploadErr: any) {
+            console.error('Direct storage upload failed, fallback to base64 data:', uploadErr);
+            const reader = new FileReader();
+            const base64Promise = new Promise<string>((resolve) => {
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(p.file);
+            });
+            const dataUrl = await base64Promise;
 
-        if (!uploadRes.ok) {
-          const errData = await uploadRes.json();
-          throw new Error(errData.message || 'Gagal mengunggah file.');
-        }
-
-        const uploadData = await uploadRes.json();
-        if (uploadData.success && Array.isArray(uploadData.attachments)) {
-          uploadedAttachments = uploadData.attachments;
+            uploadedAttachments.push({
+              id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              name: p.file.name,
+              size: p.file.size,
+              mime_type: p.file.type || 'application/octet-stream',
+              url: dataUrl,
+              file_category: p.category,
+              download_url: dataUrl
+            });
+          }
         }
       }
 
@@ -584,8 +738,8 @@ export default function ChatScreen({
         finalType = 'link';
       }
 
-      // 3. Post Message
-      const messagePayload = {
+      // 3. Post Message to Database
+      const msgPayload = {
         message: messageText,
         message_type: finalType,
         attachments: uploadedAttachments,
@@ -594,68 +748,60 @@ export default function ChatScreen({
         link_description: pendingLink?.description
       };
 
-      const res = await fetch(getApiUrl(`/api/chat/conversations/${selectedConversation.id}/messages`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(messagePayload)
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.message) {
-          setMessages((prev) => [...prev, data.message]);
-          // Reset composer
-          setInputText('');
-          setPendingFiles([]);
-          setPendingLink(null);
-          setIsAttachmentMenuOpen(false);
-          fetchConversations(true);
-        }
-      } else {
-        const errData = await res.json();
-        setErrorMessage(errData.message || 'Gagal mengirim pesan.');
+      const newMsg = await sendMessageDirect(selectedConversation.id, profile.id, msgPayload);
+      
+      if (isMountedRef.current) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === newMsg.id)) return prev;
+          return [...prev, newMsg];
+        });
+        // Reset composer
+        setInputText('');
+        setPendingFiles([]);
+        setPendingLink(null);
+        setIsAttachmentMenuOpen(false);
+        fetchConversations(true);
       }
     } catch (err: any) {
       console.error('Error sending message:', err);
       setErrorMessage(err.message || 'Gagal mengirim pesan. Silakan coba lagi.');
     } finally {
+      if (realtimeChannelRef.current) {
+        realtimeChannelRef.current.send({
+          type: 'broadcast',
+          event: 'uploading',
+          payload: { userId: profile.id, isUploading: false }
+        }).catch(() => {});
+      }
       setSendingMsg(false);
+      setUploadProgressText(null);
     }
   };
 
-  // Delete message
+  // Retract message (Sender only)
   const handleDeleteMessage = async (msgId: string) => {
     try {
-      if (isProductionStaticBuild()) {
-        const ok = await deleteMessageDirect(msgId);
-        if (ok && isMountedRef.current) {
-          setMessages((prev) => prev.filter((m) => m.id !== msgId));
-          fetchConversations(true);
-        }
-        return;
-      }
-
-      const token = await getAuthToken();
-      if (!token) return;
-
-      const res = await fetch(getApiUrl(`/api/chat/messages/${msgId}`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (res.ok) {
-        if (isMountedRef.current) {
-          setMessages((prev) => prev.filter((m) => m.id !== msgId));
-          fetchConversations(true);
-        }
+      const ok = await retractMessageDirect(msgId, profile.id);
+      if (ok && isMountedRef.current) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId
+              ? {
+                  ...m,
+                  message_type: 'retracted',
+                  message: '',
+                  attachment_url: null,
+                  attachments: [],
+                  link_url: null,
+                  is_deleted: true
+                }
+              : m
+          )
+        );
+        fetchConversations(true);
       }
     } catch (err) {
-      console.error('Error deleting message:', err);
+      console.error('Error retracting message:', err);
     }
   };
 
@@ -866,7 +1012,9 @@ export default function ChatScreen({
 
                       <div className="flex items-center justify-between gap-1 mt-0.5">
                         <p className={`text-[11px] truncate ${isSelected ? 'text-gray-900' : 'text-gray-500'}`}>
-                          {conv.last_message?.message || 'Mulai percakapan...'}
+                          {conv.last_message?.message_type === 'retracted'
+                            ? '🚫 Pesan telah ditarik'
+                            : conv.last_message?.message || 'Mulai percakapan...'}
                         </p>
 
                         {conv.unread_count > 0 && (
@@ -907,7 +1055,7 @@ export default function ChatScreen({
                       Lepaskan Berkas di Sini
                     </h4>
                     <p className="text-xs text-gray-500 font-bold">
-                      Dokumen, gambar, video, dan audio akan dilampirkan ke pesan.
+                      Dokumen Word, PDF, PPT, Excel, Gambar, Video, dan Audio akan dilampirkan ke pesan.
                     </p>
                   </div>
                 </div>
@@ -955,9 +1103,15 @@ export default function ChatScreen({
                         )}
                       </div>
                       <p className="text-[10px] font-extrabold text-gray-500">
-                        {formatPresence(
-                          selectedConversation.other_user?.is_online,
-                          selectedConversation.other_user?.last_seen_at
+                        {isOtherUserTyping ? (
+                          <span className="text-emerald-600 font-black animate-pulse">● sedang mengetik...</span>
+                        ) : isOtherUserUploading ? (
+                          <span className="text-blue-600 font-black animate-pulse">● sedang mengirim berkas...</span>
+                        ) : (
+                          formatPresence(
+                            selectedConversation.other_user?.is_online,
+                            selectedConversation.other_user?.last_seen_at
+                          )
                         )}
                       </p>
                     </div>
@@ -988,7 +1142,7 @@ export default function ChatScreen({
                     <div className="text-3xl">👋</div>
                     <p className="text-xs font-black text-gray-700">Mulai Percakapan Pribadi</p>
                     <p className="text-[11px] font-medium text-gray-500 max-w-sm mx-auto">
-                      Kirim pesan, dokumen materi, gambar, audio, atau tautan pertama Anda kepada {selectedConversation.other_user?.nama_lengkap}.
+                      Kirim pesan, dokumen materi (PDF, Word, PPT, Excel), foto, video, audio, atau tautan pertama Anda kepada {selectedConversation.other_user?.nama_lengkap}.
                     </p>
                   </div>
                 ) : (
@@ -997,13 +1151,39 @@ export default function ChatScreen({
                       key={msg.id}
                       msg={msg}
                       currentUserId={profile.id}
+                      recipientId={selectedConversation.other_user?.id}
                       onOpenImageModal={(url, name) => setActiveLightboxImage({ url, name })}
                       onDeleteMessage={handleDeleteMessage}
                     />
                   ))
                 )}
+
+                {/* Other User Realtime Typing Bubble */}
+                {isOtherUserTyping && (
+                  <div className="flex items-center gap-2 text-xs font-bold text-gray-500 italic p-2 bg-white/70 neo-border-thin rounded-xl w-fit animate-pulse shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+                    <span>{selectedConversation.other_user?.nama_lengkap || 'Rekan'} sedang mengetik...</span>
+                  </div>
+                )}
+
+                {/* Other User Realtime Uploading Bubble */}
+                {isOtherUserUploading && (
+                  <div className="flex items-center gap-2 text-xs font-bold text-blue-600 italic p-2 bg-blue-50 neo-border-thin rounded-xl w-fit animate-pulse shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping inline-block" />
+                    <span>{selectedConversation.other_user?.nama_lengkap || 'Rekan'} sedang mengirim berkas...</span>
+                  </div>
+                )}
+
                 <div ref={messagesEndRef} />
               </div>
+
+              {/* Upload Progress Banner */}
+              {uploadProgressText && (
+                <div className="px-4 py-2 bg-blue-50 border-t border-blue-200 text-blue-900 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                  <Loader2 className="w-4 h-4 text-blue-600 animate-spin flex-shrink-0" />
+                  <span className="truncate">{uploadProgressText}</span>
+                </div>
+              )}
 
               {/* Error Toast Notification if any */}
               {errorMessage && (
@@ -1012,7 +1192,7 @@ export default function ChatScreen({
                     <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
                     <span>{errorMessage}</span>
                   </div>
-                  <button onClick={() => setErrorMessage(null)} className="p-0.5 hover:bg-rose-200 rounded">
+                  <button onClick={() => setErrorMessage(null)} className="p-0.5 hover:bg-rose-200 rounded cursor-pointer">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -1047,7 +1227,7 @@ export default function ChatScreen({
                         ? 'bg-[#FF8B7B] text-gray-900 shadow-xs'
                         : 'bg-white hover:bg-gray-100 text-gray-700'
                     }`}
-                    title="Lampirkan Dokumen, Gambar, Video, Audio, atau Link"
+                    title="Lampirkan Dokumen, Foto, Video, Audio, atau Link"
                     id="attachment-menu-btn"
                   >
                     <Paperclip className="w-4 h-4" />
@@ -1062,7 +1242,7 @@ export default function ChatScreen({
                         : `Tulis pesan untuk ${selectedConversation.other_user?.nama_lengkap || 'guru'}...`
                     }
                     value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
+                    onChange={handleInputChange}
                     className="flex-1 px-4 py-2.5 bg-white neo-border-thin rounded-xl text-xs font-bold focus:outline-none focus:border-[#FF8B7B]"
                     id="chat-message-input"
                   />
@@ -1074,10 +1254,17 @@ export default function ChatScreen({
                     className="px-5 py-2.5 bg-[#FF8B7B] hover:bg-[#ff9f8f] text-gray-900 neo-border rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 transition-all"
                     id="send-chat-message-btn"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">
-                      {sendingMsg ? 'MENGIRIM...' : 'KIRIM'}
-                    </span>
+                    {sendingMsg ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span className="hidden sm:inline">MENGIRIM...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">KIRIM</span>
+                      </>
+                    )}
                   </button>
                 </form>
               </div>

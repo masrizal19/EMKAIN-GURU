@@ -124,7 +124,7 @@ export interface ForumPost {
 // Backward compatibility alias
 export type CommunityPost = ForumPost;
 
-export type ChatMessageType = 'text' | 'file' | 'image' | 'video' | 'audio' | 'link';
+export type ChatMessageType = 'text' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'retracted';
 
 export interface ChatAttachment {
   id: string;
@@ -133,7 +133,9 @@ export interface ChatAttachment {
   mime_type: string;
   url: string;
   file_category: 'doc' | 'pdf' | 'ppt' | 'excel' | 'image' | 'video' | 'audio' | 'other';
+  storage_path?: string;
   thumbnail_url?: string;
+  download_url?: string;
 }
 
 export interface ChatMessage {
@@ -142,21 +144,26 @@ export interface ChatMessage {
   sender_id: string;
   message: string;
   message_type?: ChatMessageType;
-  attachment_url?: string;
-  attachment_name?: string;
-  attachment_size?: number;
-  attachment_mime_type?: string;
-  link_url?: string;
-  link_title?: string;
-  link_description?: string;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_size?: number | null;
+  attachment_mime_type?: string | null;
+  link_url?: string | null;
+  link_title?: string | null;
+  link_description?: string | null;
   attachments?: ChatAttachment[];
   created_at: string;
   read_by?: string[];
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
   sender_profile?: {
     nama_lengkap: string;
     username: string;
     avatar_url: string | null;
     role: 'admin' | 'guru';
+    sekolah?: string | null;
+    mata_pelajaran?: string | null;
   } | null;
 }
 

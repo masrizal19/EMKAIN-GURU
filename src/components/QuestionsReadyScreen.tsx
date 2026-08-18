@@ -4,8 +4,9 @@
  */
 
 import React, { useState } from 'react';
-import { ArrowLeft, Check, Download, Share2, Copy, Eye, EyeOff, Sparkles, Star } from 'lucide-react';
+import { ArrowLeft, Check, Download, Share2, Copy, Eye, EyeOff, Sparkles, Star, FileText } from 'lucide-react';
 import { GeneratedSet } from '../types';
+import { exportToPDF, exportToWord } from '../utils/exportUtils';
 
 interface QuestionsReadyScreenProps {
   generatedSet: GeneratedSet;
@@ -22,8 +23,46 @@ export default function QuestionsReadyScreen({
   const [copied, setCopied] = useState(false);
   const [savedToBank, setSavedToBank] = useState(false);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const [exportingPDF, setExportingPDF] = useState(false);
+  const [exportingWord, setExportingWord] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const { subject, grade, topic, questionType, quantity, questions } = generatedSet;
+  const { subject, grade, topic, questionType, quantity, questions, difficulty } = generatedSet;
+
+  const getDifficultyLabel = (diff: string) => {
+    switch (diff) {
+      case 'EASY': return 'Easy';
+      case 'MEDIUM': return 'Medium';
+      case 'HARD': return 'Hard';
+      default: return diff;
+    }
+  };
+
+  const handleDownloadPDF = () => {
+    setExportingPDF(true);
+    setErrorMsg(null);
+    setTimeout(() => {
+      try {
+        exportToPDF(generatedSet);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Gagal membuat file PDF. Silakan coba lagi.');
+      } finally {
+        setExportingPDF(false);
+      }
+    }, 100);
+  };
+
+  const handleDownloadWord = async () => {
+    setExportingWord(true);
+    setErrorMsg(null);
+    try {
+      await exportToWord(generatedSet);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Gagal membuat file Word. Silakan coba lagi.');
+    } finally {
+      setExportingWord(false);
+    }
+  };
 
   const handleCopyText = () => {
     let textToCopy = `=== ${subject} - Kelas ${grade} ===\n`;
@@ -128,24 +167,35 @@ export default function QuestionsReadyScreen({
       </h1>
 
       {/* Metadata Overview Card */}
-      <div className="bg-white rounded-2xl neo-border neo-shadow p-5 md:p-6 flex items-center justify-between relative overflow-hidden" id="questions-metadata-box">
+      <div className="bg-white rounded-2xl neo-border neo-shadow p-6 space-y-4 relative overflow-hidden" id="questions-metadata-box">
         {/* Decorative corner retro star */}
         <div className="absolute right-4 top-4 text-[#FFD166] opacity-30 select-none animate-pulse" id="meta-corner-star">
           <Star className="w-16 h-16 fill-[#FFD166] text-[#1E1E1E]" strokeWidth="1.5" />
         </div>
 
-        <div className="flex items-center gap-4 relative z-10" id="meta-flex-group">
-          <div className="w-14 h-14 bg-[#B4D3FF] rounded-xl neo-border flex items-center justify-center" id="meta-sigma-icon-container">
-            <span className="text-3xl font-black font-display text-gray-900">Σ</span>
-          </div>
-          <div>
-            <h2 className="text-xl md:text-2xl font-black text-gray-900 font-display leading-tight" id="meta-subject-name">
-              {subject} Kelas {grade}
+        <div className="relative z-10 space-y-3" id="meta-flex-group">
+          <div className="space-y-1" id="meta-text-block">
+            <span className="text-[10px] font-black text-[#FF8B7B] uppercase tracking-widest block" id="meta-eyebrow">
+              TOPIK PEMBELAJARAN
+            </span>
+            <h2 className="text-2xl md:text-3xl font-black text-gray-900 font-display leading-tight" id="meta-topic-title">
+              {topic || 'Umum'}
             </h2>
-            <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-gray-500 font-bold" id="meta-pill-details">
-              <span>• {quantity} Soal {questionType === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai'}</span>
-              <span>• Topik: {topic || 'Umum'}</span>
-            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs font-black text-gray-700" id="meta-pill-row">
+            <span className="bg-[#B4D3FF] px-2.5 py-1 rounded-md neo-border-thin text-xs text-gray-900 uppercase">
+              Kelas {grade}
+            </span>
+            <span className="bg-white px-2.5 py-1 rounded-md neo-border-thin text-xs text-gray-600">
+              {quantity} Soal
+            </span>
+            <span className="bg-white px-2.5 py-1 rounded-md neo-border-thin text-xs text-gray-600">
+              {questionType === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai'}
+            </span>
+            <span className="bg-white px-2.5 py-1 rounded-md neo-border-thin text-xs text-gray-600 capitalize">
+              {getDifficultyLabel(difficulty)}
+            </span>
           </div>
         </div>
       </div>
@@ -251,14 +301,36 @@ export default function QuestionsReadyScreen({
         <p className="text-xs text-gray-500 font-bold max-w-sm mx-auto" id="bottom-ready-desc">
           Anda dapat langsung mencetak soal-soal ini ke kertas ujian atau mengunduhnya dalam format digital untuk siswa.
         </p>
-        <div className="flex flex-wrap justify-center gap-3" id="bottom-ready-buttons">
+        
+        {errorMsg && (
+          <div className="p-3 bg-red-50 text-red-700 text-xs font-bold rounded-xl neo-border-thin max-w-md mx-auto" id="export-error-msg">
+            ⚠️ {errorMsg}
+          </div>
+        )}
+
+        <div className="flex flex-wrap justify-center gap-3 animate-fade-in" id="bottom-ready-buttons">
           <button
-            onClick={() => alert('Fitur ekspor PDF sedang disiapkan untuk rilis berikutnya! Anda dapat menggunakan fitur SALIN TEKS di bagian atas untuk menyalin semua soal dengan cepat.')}
-            className="px-5 py-3 bg-[#FFB74D] text-[#1E1E1E] neo-border rounded-xl font-black text-xs tracking-wider flex items-center gap-2 cursor-pointer neo-shadow-sm neo-btn"
+            onClick={handleDownloadPDF}
+            disabled={exportingPDF || exportingWord}
+            className={`px-5 py-3 bg-[#FFB74D] text-[#1E1E1E] neo-border rounded-xl font-black text-xs tracking-wider flex items-center gap-2 cursor-pointer neo-shadow-sm neo-btn ${
+              (exportingPDF || exportingWord) ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
             id="bottom-pdf-btn"
           >
             <Download className="w-4 h-4" />
-            <span>UNDUH PDF / WORD</span>
+            <span>{exportingPDF ? 'MEMPROSES PDF...' : 'UNDUH PDF'}</span>
+          </button>
+
+          <button
+            onClick={handleDownloadWord}
+            disabled={exportingPDF || exportingWord}
+            className={`px-5 py-3 bg-[#81C784] text-[#1E1E1E] neo-border rounded-xl font-black text-xs tracking-wider flex items-center gap-2 cursor-pointer neo-shadow-sm neo-btn ${
+              (exportingPDF || exportingWord) ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            id="bottom-docx-btn"
+          >
+            <FileText className="w-4 h-4" />
+            <span>{exportingWord ? 'MEMPROSES WORD...' : 'UNDUH WORD'}</span>
           </button>
         </div>
       </div>

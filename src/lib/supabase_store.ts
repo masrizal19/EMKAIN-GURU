@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { UserProfile, Conversation, ChatMessage, ForumPost, ForumComment } from '../types';
+import { UserProfile, Conversation, ChatMessage, ChatAttachment, ForumPost, ForumComment } from '../types';
 
 /**
  * Detects if the current frontend is running as a static production build (SPA)
@@ -165,19 +165,189 @@ export async function fetchMessagesDirect(convId: string, currentUserId: string)
     return [];
   }
 
-  // Mark unread messages as read by currentUserId
+  // Get profiles map for sender info
+  const senderIds = Array.from(new Set(data.map(m => m.sender_id).filter(Boolean)));
+  const profilesMap = new Map<string, any>();
+  if (senderIds.length > 0) {
+    const { data: rawProfiles } = await supabase
+      .from('profiles')
+      .select('id, username, nama_lengkap, avatar_url, role, sekolah, mata_pelajaran, email')
+      .in('id', senderIds);
+    if (rawProfiles) {
+      rawProfiles.forEach((p: any) => {
+        const email = (p.email || '').toLowerCase().trim();
+        const isAdmin = email === 'admin@gmail.com' || p.role === 'admin';
+        profilesMap.set(p.id, {
+          id: p.id,
+          username: p.username || (email ? email.split('@')[0] : `user_${p.id.substring(0, 5)}`),
+          nama_lengkap: p.nama_lengkap || 'Guru EMKAIN',
+          avatar_url: p.avatar_url || (isAdmin ? '🛡️' : '👩‍🏫'),
+          role: isAdmin ? 'admin' : 'guru',
+          sekolah: p.sekolah,
+          mata_pelajaran: p.mata_pelajaran
+        });
+      });
+    }
+  }
+
+  // Mark unread messages as read by currentUserId in background
   const unreadMsgs = data.filter(m => m.sender_id !== currentUserId && (!m.read_by || !m.read_by.includes(currentUserId)));
   if (unreadMsgs.length > 0) {
     for (const m of unreadMsgs) {
       const updatedReadBy = Array.from(new Set([...(m.read_by || []), currentUserId]));
-      await supabase
+      supabase
         .from('messages')
         .update({ read_by: updatedReadBy })
-        .eq('id', m.id);
+        .eq('id', m.id)
+        .then();
     }
   }
 
-  return data;
+  return data.map(m => {
+    // If message is retracted
+    if (m.message_type === 'retracted' || m.is_deleted) {
+      return {
+        id: m.id,
+        conversation_id: m.conversation_id,
+        sender_id: m.sender_id,
+        message: '',
+        message_type: 'retracted',
+        attachment_url: null,
+        attachment_name: null,
+        attachment_size: null,
+        attachment_mime_type: null,
+        link_url: null,
+        link_title: null,
+        link_description: null,
+        attachments: [],
+        created_at: m.created_at,
+        read_by: m.read_by || [m.sender_id],
+        is_deleted: true,
+        sender_profile: profilesMap.get(m.sender_id) || null
+      };
+    }
+
+    // Parse attachments
+    let attachmentsList: ChatAttachment[] = [];
+    if (m.attachment_url) {
+      if (m.attachment_url.startsWith('[') || m.attachment_url.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(m.attachment_url);
+          attachmentsList = Array.isArray(parsed) ? parsed : [parsed];
+        } catch {
+          attachmentsList = [{
+            id: `att_${m.id}`,
+            name: m.attachment_name || 'Berkas',
+            size: m.attachment_size || 0,
+            mime_type: m.attachment_mime_type || 'application/octet-stream',
+            url: m.attachment_url,
+            file_category: (m.message_type as any) || 'other'
+          }];
+        }
+      } else {
+        attachmentsList = [{
+          id: `att_${m.id}`,
+          name: m.attachment_name || 'Berkas',
+          size: m.attachment_size || 0,
+          mime_type: m.attachment_mime_type || 'application/octet-stream',
+          url: m.attachment_url,
+          file_category: (m.message_type as any) || 'other'
+        }];
+      }
+    }
+
+    return {
+      id: m.id,
+      conversation_id: m.conversation_id,
+      sender_id: m.sender_id,
+      message: m.message || '',
+      message_type: m.message_type || 'text',
+      attachment_url: m.attachment_url,
+      attachment_name: m.attachment_name,
+      attachment_size: m.attachment_size,
+      attachment_mime_type: m.attachment_mime_type,
+      link_url: m.link_url,
+      link_title: m.link_title,
+      link_description: m.link_description,
+      attachments: attachmentsList,
+      created_at: m.created_at,
+      read_by: m.read_by || [m.sender_id],
+      is_deleted: false,
+      sender_profile: profilesMap.get(m.sender_id) || null
+    };
+  });
+}
+
+export async function markMessagesAsReadDirect(convId: string, currentUserId: string): Promise<void> {
+  try {
+    const { data } = await supabase
+      .from('messages')
+      .select('id, sender_id, read_by')
+      .eq('conversation_id', convId);
+
+    if (data && data.length > 0) {
+      const toUpdate = data.filter(m => m.sender_id !== currentUserId && (!m.read_by || !m.read_by.includes(currentUserId)));
+      for (const m of toUpdate) {
+        const updatedReadBy = Array.from(new Set([...(m.read_by || []), currentUserId]));
+        await supabase
+          .from('messages')
+          .update({ read_by: updatedReadBy })
+          .eq('id', m.id);
+      }
+    }
+  } catch (err) {
+    console.error('[SUPABASE_STORE] markMessagesAsReadDirect error:', err);
+  }
+}
+
+export async function uploadChatFileToStorage(
+  file: File,
+  convId: string
+): Promise<{ url: string; storagePath: string; name: string; size: number; mimeType: string }> {
+  const cleanConvId = convId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const uniquePrefix = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const storagePath = `chat-attachments/${cleanConvId}/${uniquePrefix}_${cleanName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('chat-attachments')
+    .upload(storagePath, file, {
+      cacheControl: '3600',
+      upsert: true
+    });
+
+  if (uploadError) {
+    console.error('[SUPABASE_STORE] Storage upload error:', uploadError);
+    // Try messages bucket fallback
+    const { error: fallbackError } = await supabase.storage
+      .from('messages')
+      .upload(storagePath, file, { cacheControl: '3600', upsert: true });
+
+    if (fallbackError) {
+      throw new Error(`Gagal mengunggah berkas ke storage: ${uploadError.message}`);
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from('messages').getPublicUrl(storagePath);
+    return {
+      url: publicUrl,
+      storagePath,
+      name: file.name,
+      size: file.size,
+      mimeType: file.type || 'application/octet-stream'
+    };
+  }
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('chat-attachments')
+    .getPublicUrl(storagePath);
+
+  return {
+    url: publicUrl,
+    storagePath,
+    name: file.name,
+    size: file.size,
+    mimeType: file.type || 'application/octet-stream'
+  };
 }
 
 export async function startDirectConversationDirect(currentUserId: string, targetUserId: string): Promise<Conversation> {
@@ -221,23 +391,32 @@ export async function sendMessageDirect(
   senderId: string,
   payload: {
     message: string;
-    message_type: 'text' | 'file' | 'image' | 'video' | 'audio' | 'link';
-    attachments?: any[];
+    message_type: 'text' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'retracted';
+    attachments?: ChatAttachment[];
     link_url?: string;
     link_title?: string;
     link_description?: string;
   }
 ): Promise<ChatMessage> {
   const now = new Date().toISOString();
-  const firstAttachment = payload.attachments && payload.attachments.length > 0 ? payload.attachments[0] : null;
+  const attachments = payload.attachments || [];
+  const firstAttachment = attachments.length > 0 ? attachments[0] : null;
+
+  // If multiple attachments, serialize array into attachment_url
+  let attachmentUrlValue: string | null = null;
+  if (attachments.length > 1) {
+    attachmentUrlValue = JSON.stringify(attachments);
+  } else if (firstAttachment) {
+    attachmentUrlValue = firstAttachment.url;
+  }
 
   const newMsg = {
     id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
     conversation_id: convId,
     sender_id: senderId,
-    message: payload.message,
+    message: payload.message || '',
     message_type: payload.message_type,
-    attachment_url: firstAttachment?.url || null,
+    attachment_url: attachmentUrlValue,
     attachment_name: firstAttachment?.name || null,
     attachment_size: firstAttachment?.size || null,
     attachment_mime_type: firstAttachment?.mime_type || null,
@@ -262,10 +441,91 @@ export async function sendMessageDirect(
     .update({ updated_at: now })
     .eq('id', convId);
 
-  return newMsg as ChatMessage;
+  return {
+    ...newMsg,
+    attachments: attachments,
+    is_deleted: false
+  } as ChatMessage;
 }
 
-export async function deleteMessageDirect(msgId: string): Promise<boolean> {
+export async function retractMessageDirect(msgId: string, currentUserId: string): Promise<boolean> {
+  try {
+    // 1. Fetch message details to find any attachments to remove from Supabase Storage
+    const { data: msg } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('id', msgId)
+      .maybeSingle();
+
+    if (!msg) return false;
+    if (msg.sender_id !== currentUserId) {
+      console.error('[SUPABASE_STORE] Unauthorized retract attempt');
+      return false;
+    }
+
+    // 2. Clean up any storage objects
+    const pathsToRemove: string[] = [];
+    if (msg.attachment_url) {
+      if (msg.attachment_url.includes('chat-attachments/')) {
+        const parts = msg.attachment_url.split('chat-attachments/');
+        if (parts.length > 1) {
+          pathsToRemove.push(decodeURIComponent(parts[1].split('?')[0]));
+        }
+      }
+      if (msg.attachment_url.startsWith('[') || msg.attachment_url.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(msg.attachment_url);
+          const list = Array.isArray(parsed) ? parsed : [parsed];
+          list.forEach((att: any) => {
+            if (att.storage_path) pathsToRemove.push(att.storage_path);
+            else if (att.url && att.url.includes('chat-attachments/')) {
+              const p = att.url.split('chat-attachments/')[1];
+              if (p) pathsToRemove.push(decodeURIComponent(p.split('?')[0]));
+            }
+          });
+        } catch {
+          // ignore json parse error
+        }
+      }
+    }
+
+    if (pathsToRemove.length > 0) {
+      await supabase.storage.from('chat-attachments').remove(pathsToRemove);
+    }
+
+    // 3. Mark message as retracted in database
+    const { error } = await supabase
+      .from('messages')
+      .update({
+        message_type: 'retracted',
+        message: '',
+        attachment_url: null,
+        attachment_name: null,
+        attachment_size: null,
+        attachment_mime_type: null,
+        link_url: null,
+        link_title: null,
+        link_description: null
+      })
+      .eq('id', msgId)
+      .eq('sender_id', currentUserId);
+
+    if (error) {
+      console.error('[SUPABASE_STORE] retractMessageDirect error:', error);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[SUPABASE_STORE] retractMessageDirect exception:', err);
+    return false;
+  }
+}
+
+export async function deleteMessageDirect(msgId: string, currentUserId?: string): Promise<boolean> {
+  if (currentUserId) {
+    return retractMessageDirect(msgId, currentUserId);
+  }
   const { error } = await supabase
     .from('messages')
     .delete()

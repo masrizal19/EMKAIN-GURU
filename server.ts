@@ -675,6 +675,7 @@ import {
   getMessagesForConversation,
   createMessage,
   deleteMessage,
+  markConversationMessagesAsRead,
   getMessageById,
   getAttachmentById,
   getUnreadMessagesCount,
@@ -1687,6 +1688,7 @@ app.get('/api/chat/conversations/:id/messages', async (req, res): Promise<any> =
       return res.status(403).json({ error: 'ACCESS_DENIED', message: 'Anda tidak memiliki akses ke percakapan pribadi ini.' });
     }
 
+    markConversationMessagesAsRead(convId, auth.user.id);
     const messages = getMessagesForConversation(convId, auth.user.id);
     const senderIds = messages.map(m => m.sender_id);
 
@@ -1696,6 +1698,32 @@ app.get('/api/chat/conversations/:id/messages', async (req, res): Promise<any> =
     const profilesMap = await getProfilesMap(serviceClient, senderIds);
 
     const enriched = messages.map(m => {
+      if (m.message_type === 'retracted') {
+        return {
+          id: m.id,
+          conversation_id: m.conversation_id,
+          sender_id: m.sender_id,
+          message: '',
+          message_type: 'retracted',
+          attachment_url: null,
+          attachment_name: null,
+          attachment_size: null,
+          attachment_mime_type: null,
+          link_url: null,
+          link_title: null,
+          link_description: null,
+          attachments: [],
+          created_at: m.created_at,
+          read_by: m.read_by,
+          sender_profile: profilesMap.get(m.sender_id) || {
+            nama_lengkap: m.sender_id === auth.user.id ? auth.profile.nama_lengkap : 'Guru EMKAIN',
+            username: m.sender_id === auth.user.id ? auth.profile.username : 'guru',
+            avatar_url: m.sender_id === auth.user.id ? auth.profile.avatar_url : '👩‍🏫',
+            role: m.sender_id === auth.user.id ? auth.profile.role : 'guru'
+          }
+        };
+      }
+
       // Enrich attachments with signed access tokens for the viewer
       const enrichedAtts = (m.attachments || []).map(att => {
         const signedToken = generateSignedToken(att.id, auth.user.id);
