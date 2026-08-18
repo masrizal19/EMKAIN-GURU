@@ -76,15 +76,23 @@ export default function App() {
 
   // 1. Fetch user profiles safely
   const renderStatusIndicator = () => {
-    if (supabaseConnected === null) return null;
+    const color = supabaseConnected === null ? '#FFD166' : (supabaseConnected ? '#22C55E' : '#EF4444');
+    const label = supabaseConnected === null ? 'CONNECTING...' : (supabaseConnected ? 'CONNECTED' : 'DISCONNECTED');
+    
     return (
       <div 
-        className="fixed bottom-4 right-4 z-50 px-3 py-1.5 rounded-xl neo-border text-[10px] font-black tracking-wider shadow flex items-center gap-1.5 select-none font-display uppercase"
-        style={{ backgroundColor: supabaseConnected ? '#C1F2D0' : '#FF8B7B', color: '#1E1E1E' }}
+        className="fixed bottom-20 md:bottom-4 right-4 z-50 p-2.5 rounded-full bg-white border-2 border-gray-900 shadow-[2px_2px_0_rgba(0,0,0,1)] hover:scale-115 active:scale-95 transition-transform cursor-pointer flex items-center justify-center group"
         id="supabase-dev-status-indicator"
+        title={label}
       >
-        <span className={`w-2 h-2 rounded-full bg-[#1E1E1E] ${supabaseConnected ? 'animate-pulse' : ''}`} />
-        <span>{supabaseConnected ? 'SUPABASE CONNECTED ✓' : 'SUPABASE CONNECTION FAILED'}</span>
+        <span 
+          className={`w-3 h-3 rounded-full block border border-gray-900 ${supabaseConnected === null || supabaseConnected ? 'animate-pulse' : ''}`} 
+          style={{ backgroundColor: color }} 
+        />
+        {/* Hover/Touch Tooltip */}
+        <span className="absolute bottom-11 right-0 hidden group-hover:block bg-gray-900 text-[#FAF6F0] text-[9px] font-black tracking-widest uppercase px-2 py-1 rounded border-2 border-gray-900 whitespace-nowrap pointer-events-none shadow-[2px_2px_0_rgba(255,255,255,1)]">
+          {label}
+        </span>
       </div>
     );
   };
@@ -643,11 +651,45 @@ export default function App() {
 
   // D. SHARED LAYOUT FOR AUTHENTICATED PORTALS (Dashboard, Generate Soal, Questions Ready, Profile, Community, Chat, Admin Panel)
   return (
-    <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-6 px-4 md:px-8 flex items-center justify-center font-body" id="authenticated-workspace">
-      <div className="flex flex-col lg:flex-row w-full max-w-7xl bg-[#FAF6F0] rounded-2xl neo-border neo-shadow-lg overflow-hidden min-h-[90vh]" id="app-workspace-layout">
+    <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-0 px-0 md:py-6 md:px-4 lg:px-8 flex items-center justify-center font-body" id="authenticated-workspace">
+      <div className="flex flex-col lg:flex-row w-full max-w-7xl bg-[#FAF6F0] rounded-none md:rounded-2xl border-0 md:border-2 border-gray-900 shadow-none md:shadow-lg overflow-hidden min-h-screen md:min-h-[90vh]" id="app-workspace-layout">
         
+        {/* MOBILE HEADER */}
+        <header className="lg:hidden flex items-center justify-between bg-[#FAF6F0] px-4 py-3 border-b-2 border-gray-900 sticky top-0 z-30" id="mobile-app-header">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-full bg-[#FFD166] neo-border-thin flex items-center justify-center overflow-hidden">
+              <span className="text-xl">{profile?.avatar_url || '👩‍🏫'}</span>
+            </div>
+            <div>
+              <h1 className="text-sm font-black font-display text-gray-900 leading-none">EMKAIN GURU</h1>
+              <span className="text-[8px] font-black uppercase tracking-widest text-gray-500 block">Edu-Creative Portal</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {profile?.role === 'admin' && (
+              <button 
+                onClick={() => { 
+                  setAdminSubAction('list');
+                  window.location.hash = '#/admin'; 
+                }}
+                className="p-1.5 bg-[#FFD166] neo-border-thin rounded-lg text-gray-900 cursor-pointer"
+                title="Admin Panel"
+              >
+                <ShieldCheck className="w-4 h-4" />
+              </button>
+            )}
+            <button 
+              onClick={handleLogout}
+              className="p-1.5 bg-red-50 hover:bg-red-100 rounded-lg text-red-600 border border-red-200 transition-colors cursor-pointer"
+              title="Keluar"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
         {/* SHARED STABLE SIDEBAR */}
-        <aside className="w-full lg:w-[280px] bg-[#FAF6F0] flex flex-col justify-between neo-border-r p-6" id="app-workspace-sidebar">
+        <aside className="hidden lg:flex w-full lg:w-[280px] bg-[#FAF6F0] flex-col justify-between lg:border-r-2 lg:border-gray-900 p-6" id="app-workspace-sidebar">
           <div>
             {/* Logo Brand Header */}
             <div className="flex items-center gap-3 mb-8" id="sidebar-brand-header">
@@ -869,7 +911,7 @@ export default function App() {
         </aside>
 
         {/* WORKSPACE CONTENT PANELS */}
-        <main className="flex-1 neo-grid-bg p-6 lg:p-8 overflow-y-auto" id="app-workspace-content-pane">
+        <main className="flex-1 neo-grid-bg p-4 md:p-6 lg:p-8 pb-24 lg:pb-8 overflow-y-auto" id="app-workspace-content-pane">
           <div className="max-w-6xl mx-auto" id="workspace-sub-viewport">
             
             {screen === AppScreen.DASHBOARD && (
@@ -951,6 +993,79 @@ export default function App() {
 
           </div>
         </main>
+
+        {/* MOBILE BOTTOM NAVIGATION */}
+        <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-[#FAF6F0] border-t-2 border-gray-900 px-2 py-2 flex justify-around items-center z-40 shadow-[0_-4px_0_rgba(0,0,0,1)]" id="mobile-app-bottom-nav">
+          {/* 1. Dashboard */}
+          <button 
+            onClick={() => { window.location.hash = '#/dashboard'; }}
+            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
+              screen === AppScreen.DASHBOARD 
+                ? 'bg-[#FF8B7B] text-[#1E1E1E] border border-gray-900 shadow-[1px_1px_0_rgba(0,0,0,1)]' 
+                : 'text-gray-600'
+            }`}
+          >
+            <LayoutGrid className="w-5 h-5" />
+            <span className="text-[9px] font-black uppercase tracking-wider">Dashboard</span>
+          </button>
+
+          {/* 2. Materi */}
+          <button 
+            onClick={() => { window.location.hash = '#/materi'; }}
+            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
+              screen === AppScreen.MATERI 
+                ? 'bg-[#FF8B7B] text-[#1E1E1E] border border-gray-900 shadow-[1px_1px_0_rgba(0,0,0,1)]' 
+                : 'text-gray-600'
+            }`}
+          >
+            <BookOpen className="w-5 h-5" />
+            <span className="text-[9px] font-black uppercase tracking-wider">Materi</span>
+          </button>
+
+          {/* 3. Ujian */}
+          <button 
+            onClick={() => { window.location.hash = '#/ujian'; }}
+            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
+              screen === AppScreen.UJIAN 
+                ? 'bg-[#FF8B7B] text-[#1E1E1E] border border-gray-900 shadow-[1px_1px_0_rgba(0,0,0,1)]' 
+                : 'text-gray-600'
+            }`}
+          >
+            <FileCheck2 className="w-5 h-5" />
+            <span className="text-[9px] font-black uppercase tracking-wider">Ujian</span>
+          </button>
+
+          {/* 4. Forum */}
+          <button 
+            onClick={() => { window.location.hash = '#/forum'; }}
+            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
+              screen === AppScreen.COMMUNITY 
+                ? 'bg-[#FF8B7B] text-[#1E1E1E] border border-gray-900 shadow-[1px_1px_0_rgba(0,0,0,1)]' 
+                : 'text-gray-600'
+            }`}
+          >
+            <Users className="w-5 h-5" />
+            <span className="text-[9px] font-black uppercase tracking-wider">Forum</span>
+          </button>
+
+          {/* 5. Lounge / Chat */}
+          <button 
+            onClick={() => { window.location.hash = '#/lounge'; }}
+            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-all cursor-pointer relative ${
+              screen === AppScreen.CHAT 
+                ? 'bg-[#FF8B7B] text-[#1E1E1E] border border-gray-900 shadow-[1px_1px_0_rgba(0,0,0,1)]' 
+                : 'text-gray-600'
+            }`}
+          >
+            <MessageSquare className="w-5 h-5" />
+            <span className="text-[9px] font-black uppercase tracking-wider">Lounge</span>
+            {unreadChatCount > 0 && (
+              <span className="absolute -top-1 -right-1 px-1 py-0.2 bg-red-500 text-white rounded-full text-[8px] font-black border border-white animate-pulse">
+                {unreadChatCount}
+              </span>
+            )}
+          </button>
+        </nav>
 
       </div>
 

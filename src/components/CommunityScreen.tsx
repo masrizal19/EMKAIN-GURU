@@ -816,7 +816,7 @@ export default function CommunityScreen({
         {/* ========================================================================= */}
         {/* LEFT COLUMN: BAGIKAN INSPIRASI (4 cols on lg) */}
         {/* ========================================================================= */}
-        <div className="lg:col-span-4 bg-white rounded-2xl neo-border neo-shadow p-5 sticky top-4 space-y-4" id="community-left-panel">
+        <div className="lg:col-span-4 bg-white rounded-2xl neo-border neo-shadow p-5 lg:sticky lg:top-4 space-y-4" id="community-left-panel">
           <div className="flex items-center justify-between pb-2 border-b border-gray-100">
             <h3 className="text-sm font-black uppercase text-gray-900 font-display flex items-center gap-2">
               <span>Bagikan Inspirasi</span>
@@ -1155,7 +1155,7 @@ export default function CommunityScreen({
         {/* ========================================================================= */}
         {/* RIGHT COLUMN: ANGGOTA EMKAIN DIRECTORY (3 cols on lg) */}
         {/* ========================================================================= */}
-        <div className="lg:col-span-3 bg-white rounded-2xl neo-border neo-shadow p-5 sticky top-4 space-y-4" id="community-members-directory">
+        <div className="lg:col-span-3 bg-white rounded-2xl neo-border neo-shadow p-5 lg:sticky lg:top-4 space-y-4" id="community-members-directory">
           <div className="flex items-center justify-between pb-2 border-b border-gray-100">
             <h3 className="text-sm font-black uppercase text-gray-900 font-display flex items-center gap-1.5">
               <Users className="w-4 h-4 text-emerald-600" />

@@ -774,7 +774,7 @@ export default function ChatScreen({
       </div>
 
       {/* Main Split Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 h-[calc(100vh-210px)] min-h-[550px]">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 h-[calc(100vh-270px)] md:h-[calc(100vh-210px)] min-h-[420px] md:min-h-[550px]">
         
         {/* ========================================================================= */}
         {/* LEFT PANEL: CONVERSATIONS LIST (4 cols on md) */}
