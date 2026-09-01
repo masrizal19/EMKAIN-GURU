@@ -6,11 +6,14 @@ import { UserProfile, Conversation, ChatMessage, ChatAttachment, ForumPost, Foru
  * deployed on app.mkverse.my.id, which does not have access to the local container Express server.
  */
 export const isProductionStaticBuild = (): boolean => {
+  if (typeof window === 'undefined') return false;
   const hostname = window.location.hostname;
   return (
-    hostname === 'app.mkverse.my.id' ||
-    hostname === 'mkverse.my.id' ||
-    (!import.meta.env.DEV && !hostname.includes('.run.app'))
+    hostname.includes('mkverse.my.id') ||
+    hostname.includes('github.io') ||
+    hostname.includes('vercel.app') ||
+    hostname.includes('netlify.app') ||
+    (!import.meta.env.DEV && !hostname.includes('.run.app') && !hostname.includes('localhost') && !hostname.includes('127.0.0.1'))
   );
 };
 

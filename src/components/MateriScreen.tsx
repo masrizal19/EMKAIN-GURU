@@ -64,7 +64,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
   
   const [materiList, setMateriList] = useState<MateriItem[]>(INITIAL_MATERI_LIST);
   
-  const [creationMode, setCreationMode] = useState<'idle' | 'select' | 'manual' | 'ai'>('idle');
+  const [creationMode, setCreationMode] = useState<'idle' | 'compose' | 'select' | 'manual' | 'ai'>('idle');
   const [composeTab, setComposeTab] = useState<'manual' | 'upload' | 'ai'>('manual');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);

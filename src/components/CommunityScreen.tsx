@@ -342,7 +342,7 @@ export default function CommunityScreen({
           // 2. Update posts list author_profile
           setPosts(prev => {
             return prev.map(p => {
-              if (p.author_profile && p.author_profile.id === mapped.id) {
+              if (p.author_id === mapped.id) {
                 return {
                   ...p,
                   author_profile: mapped

@@ -81,7 +81,9 @@ export default function UserProfileModal({
                 {user.nama_lengkap}
               </h2>
               {isAdmin && (
-                <ShieldCheck className="w-5 h-5 text-amber-600 inline" title="Official EMKAIN Administrator" />
+                <span title="Official EMKAIN Administrator">
+                  <ShieldCheck className="w-5 h-5 text-amber-600 inline" />
+                </span>
               )}
             </div>
             <p className="text-xs font-bold text-gray-500">

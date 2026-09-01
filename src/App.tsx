@@ -283,12 +283,22 @@ export default function App() {
 
     const initializeAuth = async () => {
       try {
-        const { data: { session: activeSession } } = await supabase.auth.getSession();
+        // Safety timeout to guarantee initial render never hangs indefinitely
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) => 
+          setTimeout(() => resolve({ data: { session: null } }), 4000)
+        );
+
+        const { data: { session: activeSession } } = await Promise.race([sessionPromise, timeoutPromise]);
         setSession(activeSession);
 
         if (activeSession?.user) {
           const prof = await fetchUserProfile(activeSession.user.id);
-          await updatePresenceDirect(activeSession.user.id, true);
+          try {
+            await updatePresenceDirect(activeSession.user.id, true);
+          } catch (e) {
+            // ignore
+          }
           handleHashRouting(prof, activeSession);
         } else {
           setProfile(null);
@@ -296,6 +306,9 @@ export default function App() {
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
+        setSession(null);
+        setProfile(null);
+        handleHashRouting(null, null);
       } finally {
         setAuthLoading(false);
       }
@@ -616,8 +629,36 @@ export default function App() {
     );
   }
 
-  // C. LOGIN SCREEN
-  if (screen === AppScreen.LOGIN) {
+  // C. UNAUTHENTICATED GATES: LOGIN & REGISTER
+  if (!session) {
+    if (screen === AppScreen.REGISTER) {
+      return (
+        <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-8 px-4 flex items-center justify-center font-body" id="register-screen-wrapper">
+          <div className="w-full max-w-md bg-white rounded-2xl neo-border neo-shadow-lg p-8 text-center space-y-6">
+            <div className="w-16 h-16 rounded-full bg-[#FFD166] neo-border flex items-center justify-center text-3xl mx-auto">
+              🛡️
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-2xl font-black text-gray-900 font-display uppercase leading-tight">AKUN EMKAIN DIBUAT OLEH ADMIN</h1>
+              <p className="text-sm font-medium text-gray-600 leading-relaxed">
+                Jika Anda guru dan belum memiliki akun, silakan hubungi administrator EMKAIN.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                window.location.hash = '#/login';
+                setScreen(AppScreen.LOGIN);
+              }}
+              className="w-full py-3.5 bg-[#FF8B7B] text-[#1E1E1E] neo-border rounded-xl font-black text-xs uppercase cursor-pointer"
+            >
+              KEMBALI KE LOGIN
+            </button>
+          </div>
+          {renderStatusIndicator()}
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-8 px-4 flex items-center justify-center font-body" id="login-screen-wrapper">
         <LoginScreen onLoginSuccess={handleLoginSuccess} />
@@ -626,29 +667,14 @@ export default function App() {
     );
   }
 
-  // C.5 REGISTER INFO SCREEN
-  if (screen === AppScreen.REGISTER) {
+  // C.5 PROFILE LOADING GATE FOR AUTHENTICATED USERS
+  if (!profile) {
     return (
-      <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-8 px-4 flex items-center justify-center font-body" id="register-screen-wrapper">
-        <div className="w-full max-w-md bg-white rounded-2xl neo-border neo-shadow-lg p-8 text-center space-y-6">
-          <div className="w-16 h-16 rounded-full bg-[#FFD166] neo-border flex items-center justify-center text-3xl mx-auto">
-            🛡️
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-2xl font-black text-gray-900 font-display uppercase leading-tight">AKUN EMKAIN DIBUAT OLEH ADMIN</h1>
-            <p className="text-sm font-medium text-gray-600 leading-relaxed">
-              Jika Anda guru dan belum memiliki akun, silakan hubungi administrator EMKAIN.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              window.location.hash = '#/login';
-              setScreen(AppScreen.LOGIN);
-            }}
-            className="w-full py-3.5 bg-[#FF8B7B] text-[#1E1E1E] neo-border rounded-xl font-black text-xs uppercase cursor-pointer"
-          >
-            KEMBALI KE LOGIN
-          </button>
+      <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg flex items-center justify-center font-body" id="profile-boot-loader">
+        <div className="bg-white rounded-2xl neo-border neo-shadow p-8 text-center max-w-sm">
+          <div className="text-4xl animate-bounce mb-4">👩‍🏫</div>
+          <h2 className="text-lg font-black uppercase text-gray-900 font-display">MENYINKRONKAN PROFIL...</h2>
+          <p className="text-xs font-bold text-gray-400 mt-1">Menyiapkan workspace pengajaran Anda.</p>
         </div>
         {renderStatusIndicator()}
       </div>

@@ -322,7 +322,7 @@ export default function RpmScreen({ profile, onBack }: RpmScreenProps) {
         assessment: `Asesmen Formatif: Observasi keaktifan siswa saat diskusi ${topicStr}.\nAsesmen Sumatif: Kuis tertulis tentang prinsip dasar ${topicStr}.`
       }));
       setAiLoading(false);
-      setCreationMode('manual');
+      setComposeTab('manual');
     }, 1200);
   };
 

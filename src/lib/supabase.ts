@@ -7,8 +7,18 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const cleanEnvVar = (val: any): string => {
+  if (typeof val !== 'string') return '';
+  return val.trim().replace(/^["']|["']$/g, '');
+};
+
+const supabaseUrl = cleanEnvVar(import.meta.env.VITE_SUPABASE_URL || (import.meta.env as any).NEXT_PUBLIC_SUPABASE_URL);
+const supabasePublishableKey = cleanEnvVar(
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_KEY ||
+  (import.meta.env as any).NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 console.log('[SUPABASE CONFIG]', {
   hasUrl: Boolean(supabaseUrl),
@@ -19,7 +29,7 @@ export const isSupabaseConfigured = !!(supabaseUrl && supabasePublishableKey);
 
 function sanitizeSupabaseUrl(url: string | undefined): string {
   if (!url) return '';
-  let cleaned = url.trim();
+  let cleaned = url.trim().replace(/^["']|["']$/g, '');
   // Strip trailing slashes first
   cleaned = cleaned.replace(/\/+$/, '');
   // Remove trailing path segments like /rest/v1, /rest, /auth/v1, /auth, /v1, /api
@@ -44,8 +54,16 @@ if (isSupabaseConfigured) {
 } else {
   console.warn(
     'EMKAIN GURU: Supabase environment variables are missing! ' +
-    'Please configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your settings/environment.'
+    'Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY) in your settings/environment.'
   );
 }
 
-export const supabase = createClient(sanitizedUrl, activeKey);
+export const supabase = createClient(sanitizedUrl, activeKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storageKey: 'emkain-guru-auth-session'
+  }
+});
+
