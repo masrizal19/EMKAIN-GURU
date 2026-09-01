@@ -21,6 +21,7 @@ interface DashboardScreenProps {
   onNavigateToGenerate: () => void;
   onNavigateToMateri?: () => void;
   onNavigateToUjian?: () => void;
+  onNavigateToRpm?: () => void;
   onLoadRecentWork: (workId: string) => void;
   recentWorks: RecentWork[];
   onLogout: () => void;
@@ -32,6 +33,7 @@ export default function DashboardScreen({
   onNavigateToGenerate,
   onNavigateToMateri,
   onNavigateToUjian,
+  onNavigateToRpm,
   onLoadRecentWork,
   recentWorks,
 }: DashboardScreenProps) {
@@ -147,7 +149,7 @@ export default function DashboardScreen({
               </p>
             </div>
             <button
-              onClick={onNavigateToGenerate}
+              onClick={onNavigateToRpm || onNavigateToGenerate}
               className="mt-6 w-full py-2.5 bg-white text-gray-900 neo-border-thin rounded-xl font-extrabold text-xs tracking-wider flex items-center justify-center gap-2 cursor-pointer hover:bg-gray-50 active:translate-y-0.5 active:translate-x-0.5 transition-all"
               id="action-card-btn-4"
             >
@@ -223,7 +225,7 @@ export default function DashboardScreen({
           </div>
 
           <div className="space-y-4" id="recent-work-list">
-            {recentWorks.map((work) => (
+            {Array.from(new Map(recentWorks.map((w) => [w.id, w])).values()).map((work) => (
               <div
                 key={work.id}
                 onClick={() => work.type === 'SOAL' && onLoadRecentWork(work.id)}

@@ -41,6 +41,21 @@ import {
   Loader2
 } from 'lucide-react';
 
+function deduplicateById<T extends { id?: any }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    const id = item?.id;
+    if (id && !seen.has(String(id))) {
+      seen.add(String(id));
+      result.push(item);
+    } else if (!id) {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
 interface ChatScreenProps {
   profile: UserProfile;
   onBack: () => void;
@@ -965,7 +980,7 @@ export default function ChatScreen({
                 </p>
               </div>
             ) : (
-              filteredConversations.map((conv) => {
+              deduplicateById(filteredConversations).map((conv: Conversation) => {
                 const other = conv.other_user;
                 if (!other) return null;
                 const isSelected = selectedConversation?.id === conv.id;
@@ -1146,7 +1161,7 @@ export default function ChatScreen({
                     </p>
                   </div>
                 ) : (
-                  messages.map((msg) => (
+                  deduplicateById(messages).map((msg: ChatMessage) => (
                     <ChatMessageItem
                       key={msg.id}
                       msg={msg}
@@ -1339,7 +1354,7 @@ export default function ChatScreen({
                   Tidak ada guru yang cocok dengan pencarian
                 </div>
               ) : (
-                filteredNewChatMembers.map((member) => {
+                deduplicateById(filteredNewChatMembers).map((member: UserProfile) => {
                   const isMemberAdmin = member.role === 'admin' || member.email?.toLowerCase().trim() === 'admin@gmail.com';
 
                   return (

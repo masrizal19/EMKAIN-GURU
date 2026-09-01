@@ -75,7 +75,7 @@ export default function ChatPendingAttachments({
 
           return (
             <div
-              key={idx}
+              key={`${item.file.name}-${item.file.lastModified}-${idx}`}
               className="relative p-2 bg-white neo-border-thin rounded-xl flex items-center gap-2 max-w-xs shadow-2xs"
             >
               {/* Image Thumbnail Preview or Icon Badge */}

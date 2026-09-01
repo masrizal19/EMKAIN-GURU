@@ -86,7 +86,8 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
           if (response.ok) {
             const result = await response.json();
             if (result.success && Array.isArray(result.teachers)) {
-              setTeachers(result.teachers);
+              const uniqueTeachers = Array.from(new Map(result.teachers.map((t: any) => [t.id, t])).values());
+              setTeachers(uniqueTeachers as UserProfile[]);
               apiFetchedSuccessfully = true;
             }
           }
@@ -106,7 +107,9 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         if (error) {
           console.error('Error fetching teachers via Supabase fallback:', error);
         } else {
-          setTeachers((data as UserProfile[]) || []);
+          const list = (data as UserProfile[]) || [];
+          const uniqueList = Array.from(new Map(list.map((t) => [t.id, t])).values());
+          setTeachers(uniqueList);
         }
       }
     } catch (err) {
@@ -729,7 +732,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredTeachers.map((teacher) => (
+                {Array.from(new Map(filteredTeachers.map((t) => [t.id, t])).values()).map((teacher: UserProfile) => (
                   <tr key={teacher.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="p-3.5 flex items-center gap-3">
                       <div className="w-9 h-9 rounded-full bg-[#FAF6F0] neo-border-thin flex items-center justify-center text-xl">

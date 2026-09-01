@@ -238,7 +238,7 @@ export default function QuestionsReadyScreen({
                     
                     return (
                       <button
-                        key={optIndex}
+                        key={`${q.id}-opt-${letter}`}
                         type="button"
                         onClick={() => handleOptionClick(q.id, optIndex)}
                         className={`p-4 rounded-xl neo-border flex items-center justify-between text-left cursor-pointer transition-all ${

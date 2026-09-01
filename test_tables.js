@@ -1,0 +1,10 @@
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+dotenv.config();
+const supabase = createClient(process.env.VITE_SUPABASE_URL.replace('/rest/v1/', ''), process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+async function test() {
+  const { data, error } = await supabase.from('materi_files').select('*').limit(1);
+  console.log('materi_files:', error || 'exists');
+}
+test();

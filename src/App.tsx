@@ -16,6 +16,7 @@ import DashboardScreen from './components/DashboardScreen';
 import GenerateSoalScreen from './components/GenerateSoalScreen';
 import QuestionsReadyScreen from './components/QuestionsReadyScreen';
 import MateriScreen from './components/MateriScreen';
+import RpmScreen from './components/RpmScreen';
 import UjianScreen from './components/UjianScreen';
 import ProfileScreen from './components/ProfileScreen';
 import CommunityScreen from './components/CommunityScreen';
@@ -223,6 +224,8 @@ export default function App() {
       setScreen(AppScreen.QUESTIONS_READY);
     } else if (hash === '#/materi') {
       setScreen(AppScreen.MATERI);
+    } else if (hash === '#/rpm') {
+      setScreen(AppScreen.RPM);
     } else if (hash === '#/ujian') {
       setScreen(AppScreen.UJIAN);
     } else if (hash === '#/forum' || hash === '#/community') {
@@ -487,7 +490,10 @@ export default function App() {
       grade: newSet.grade
     };
 
-    setRecentWorks((prev) => [newRecentWork, ...prev]);
+    setRecentWorks((prev) => {
+      const filtered = prev.filter((w) => w.id !== newRecentWork.id);
+      return [newRecentWork, ...filtered];
+    });
     setPendingGenParams(null);
   };
 
@@ -919,6 +925,7 @@ export default function App() {
                 onNavigateToGenerate={handleNavigateToGenerate}
                 onNavigateToMateri={() => { window.location.hash = '#/materi'; }}
                 onNavigateToUjian={() => { window.location.hash = '#/ujian'; }}
+                onNavigateToRpm={() => { window.location.hash = '#/rpm'; }}
                 onLoadRecentWork={handleLoadRecentWork}
                 recentWorks={recentWorks}
                 onLogout={handleLogout}
@@ -944,6 +951,13 @@ export default function App() {
 
             {screen === AppScreen.MATERI && profile && (
               <MateriScreen
+                profile={profile}
+                onBack={handleBackToDashboard}
+              />
+            )}
+
+            {screen === AppScreen.RPM && profile && (
+              <RpmScreen
                 profile={profile}
                 onBack={handleBackToDashboard}
               />

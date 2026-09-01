@@ -10,7 +10,8 @@ export const getApiUrl = (path: string): string => {
       hostname.includes('run.app') || 
       hostname.includes('localhost') || 
       hostname.includes('127.0.0.1') ||
-      hostname.includes('gitpod')
+      hostname.includes('gitpod') ||
+      hostname.includes('googleusercontent.com')
     ) {
       return cleanPath;
     }

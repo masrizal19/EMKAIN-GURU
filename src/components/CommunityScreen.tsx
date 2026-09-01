@@ -35,6 +35,21 @@ import {
   Clock
 } from 'lucide-react';
 
+function deduplicateById<T extends { id?: any }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    const id = item?.id;
+    if (id && !seen.has(String(id))) {
+      seen.add(String(id));
+      result.push(item);
+    } else if (!id) {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
 interface CommunityScreenProps {
   profile: UserProfile;
   onBack: () => void;
@@ -933,7 +948,7 @@ export default function CommunityScreen({
               </p>
             </div>
           ) : (
-            posts.map((post) => {
+            deduplicateById(posts).map((post: ForumPost) => {
               const isPostAuthorAdmin =
                 post.author_profile?.role === 'admin' ||
                 post.author_profile?.username === 'admin' ||
@@ -1108,7 +1123,7 @@ export default function CommunityScreen({
                         </div>
                       ) : (
                         <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
-                          {postComments.map((comm) => {
+                          {deduplicateById(postComments).map((comm: ForumComment) => {
                             const isCommAuthorAdmin =
                               comm.author_profile?.role === 'admin' ||
                               comm.author_profile?.username === 'admin';
@@ -1203,7 +1218,7 @@ export default function CommunityScreen({
             </div>
           ) : (
             <div className="space-y-3 max-h-[580px] overflow-y-auto pr-1" id="members-list-scroll">
-              {filteredMembers.map((member) => {
+              {deduplicateById(filteredMembers).map((member: UserProfile) => {
                 const isMemberAdmin = member.role === 'admin' || member.email?.toLowerCase().trim() === 'admin@gmail.com';
                 const isSelf = member.id === profile.id;
 
