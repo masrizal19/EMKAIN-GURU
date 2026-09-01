@@ -266,6 +266,7 @@ app.get('/api/admin/teachers', async (req, res): Promise<any> => {
 // SECURE ENDPOINT: Create a Guru User account (Admin only)
 // -------------------------------------------------------------
 app.post('/api/admin/create-user', async (req, res): Promise<any> => {
+  console.log('--- CREATE USER API REACHED ---');
   try {
     if (!isSupabaseConfigured()) {
       return res.status(500).json({
@@ -295,21 +296,26 @@ app.post('/api/admin/create-user', async (req, res): Promise<any> => {
       return res.status(400).json({ error: 'INVALID_PASSWORD', message: 'Password minimal 6 karakter.' });
     }
 
-    // 3. Ensure username is unique
+    // 3. Ensure username and email are unique
     const sanitizedUsername = username.trim().toLowerCase().replace(/\s+/g, '_');
-    const { data: existingUser } = await serviceClient
-      .from('profiles')
-      .select('id')
-      .eq('username', sanitizedUsername)
-      .maybeSingle();
+    const sanitizedEmail = email.trim().toLowerCase();
 
-    if (existingUser) {
+    const { data: existingUser, error: existingUserErr } = await serviceClient
+      .from('profiles')
+      .select('id, username, email')
+      .or(`username.eq.${sanitizedUsername},email.eq.${sanitizedEmail}`);
+
+    if (existingUser && existingUser.length > 0) {
+      const match = existingUser[0];
+      if (match.email === sanitizedEmail) {
+        return res.status(400).json({ error: 'EMAIL_ALREADY_EXISTS', message: 'Email sudah digunakan oleh guru lain.' });
+      }
       return res.status(400).json({ error: 'USERNAME_ALREADY_EXISTS', message: 'Username sudah digunakan oleh guru lain.' });
     }
 
     // 4. Create User in Supabase Auth via Admin API
     const { data: authResult, error: createAuthError } = await serviceClient.auth.admin.createUser({
-      email: email.trim().toLowerCase(),
+      email: sanitizedEmail,
       password: password,
       email_confirm: true,
       user_metadata: {

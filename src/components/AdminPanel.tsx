@@ -236,7 +236,15 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         })
       });
 
-      const resData = await response.json();
+      let resData;
+      try {
+        resData = await response.json();
+      } catch (parseError) {
+        console.error('Error parsing response JSON in create-user:', parseError);
+        setCreateError(`Error dari server (${response.status}): Gagal membaca respons. Pastikan URL API benar.`);
+        setCreateLoading(false);
+        return;
+      }
 
       if (!response.ok) {
         const errMsg = resData.message || '';
@@ -286,7 +294,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         setKelas('');
       }
     } catch (err: any) {
-      setCreateError('Kesalahan koneksi ke server.');
+      console.error('FETCH CATCH ERROR:', err); setCreateError('Kesalahan koneksi ke server: ' + err.message);
     } finally {
       setCreateLoading(false);
     }
@@ -325,7 +333,14 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         })
       });
 
-      const resData = await response.json();
+      let resData;
+      try {
+        resData = await response.json();
+      } catch (parseError) {
+        setEditError(`Error server (${response.status}): Gagal membaca respons.`);
+        setEditLoading(false);
+        return;
+      }
 
       if (!response.ok) {
         const errMsg = resData.message || '';
@@ -341,7 +356,8 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
         fetchTeachers();
       }
     } catch (err: any) {
-      setEditError('Kesalahan koneksi ke server.');
+      console.error('[DEV_EDIT_USER_EXCEPTION]', err);
+      setEditError(`Kesalahan koneksi: ${err.message || err}`);
     } finally {
       setEditLoading(false);
     }
@@ -409,7 +425,7 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
       }
     } catch (err: any) {
       console.error('[DELETE USER EXCEPTION]', err);
-      setDeleteError('Kesalahan koneksi ke server.');
+      setDeleteError(`Kesalahan koneksi: ${err.message || err}`);
     } finally {
       setDeleteLoading(false);
     }
