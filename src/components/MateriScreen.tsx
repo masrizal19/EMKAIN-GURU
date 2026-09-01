@@ -25,6 +25,7 @@ interface MateriItem {
   uploaded_by?: string;
   file_path?: string;
   category?: string;
+  sumber_materi?: string;
 }
 
 function deduplicateById<T extends { id?: any }>(items: T[]): T[] {
@@ -72,48 +73,87 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFilesList, setUploadedFilesList] = useState<any[]>([]);
   const [itemToDelete, setItemToDelete] = useState<MateriItem | null>(null);
+  const [isAiDraft, setIsAiDraft] = useState(false);
 
-  React.useEffect(() => {
-    let isMounted = true;
-    const fetchFiles = async () => {
-      const { data, error } = await supabase
+  const fetchMateriData = React.useCallback(async () => {
+    try {
+      const { data: filesData, error: filesErr } = await supabase
         .from('materi_files')
         .select('*')
         .eq('category', 'materi')
         .order('created_at', { ascending: false });
-      
-      if (!isMounted) return;
 
-      if (data && data.length > 0) {
-        const uploadedItems: MateriItem[] = data.map((item: any) => ({
-          id: item.id,
-          title: item.title,
-          subject: item.subject,
-          grade: item.class_level,
-          type: 'Modul PDF' as any,
-          author: 'Guru',
-          downloads: 0,
-          date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
-          description: `File: ${item.file_name} (${Math.round((item.file_size || 0) / 1024)} KB)`,
-          tags: ['File Upload'],
-          content: item.file_path,
-          uploaded_by: item.uploaded_by,
-          file_path: item.file_path,
-          category: item.category || 'materi'
-        }));
+      if (filesErr) {
+        console.error('Error fetching from materi_files:', filesErr);
+      }
 
-        setMateriList(prev => {
-          const nonDbItems = prev.filter(i => !data.some((d: any) => d.id === i.id));
-          return deduplicateById([...uploadedItems, ...nonDbItems]);
+      const { data: textData, error: textErr } = await supabase
+        .from('materi')
+        .select('*')
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: false });
+
+      if (textErr) {
+        console.error('Error fetching from materi:', textErr);
+      }
+
+      const uploadedItems: MateriItem[] = [];
+
+      if (filesData && filesData.length > 0) {
+        filesData.forEach((item: any) => {
+          uploadedItems.push({
+            id: item.id,
+            title: item.title,
+            subject: item.subject,
+            grade: item.class_level,
+            type: 'Modul PDF' as any,
+            author: 'Guru',
+            downloads: 0,
+            date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
+            description: `File: ${item.file_name} (${Math.round((item.file_size || 0) / 1024)} KB)`,
+            tags: ['File Upload'],
+            content: item.file_path,
+            uploaded_by: item.uploaded_by,
+            file_path: item.file_path,
+            category: item.category || 'materi',
+            sumber_materi: 'file'
+          });
         });
       }
-    };
-    fetchFiles();
 
-    return () => {
-      isMounted = false;
-    };
+      if (textData && textData.length > 0) {
+        textData.forEach((item: any) => {
+          uploadedItems.push({
+            id: item.id,
+            title: item.judul_materi,
+            subject: item.mata_pelajaran,
+            grade: item.kelas,
+            type: (item.tipe_materi || 'Rangkuman AI') as any,
+            author: 'Guru AI',
+            downloads: 0,
+            date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
+            description: item.isi_materi ? (item.isi_materi.substring(0, 100) + '...') : '',
+            tags: Array.isArray(item.tags) ? item.tags : (item.tags ? [item.tags] : ['AI']),
+            content: item.isi_materi,
+            uploaded_by: item.user_id,
+            sumber_materi: item.sumber_materi || 'ai'
+          });
+        });
+      }
+
+      setMateriList(prev => {
+        // Keep initial hardcoded items as fallback
+        const initialFiltered = INITIAL_MATERI_LIST.filter(i => !uploadedItems.some(u => u.id === i.id));
+        return deduplicateById([...uploadedItems, ...initialFiltered]);
+      });
+    } catch (err) {
+      console.error('Exception in fetchMateriData:', err);
+    }
   }, []);
+
+  React.useEffect(() => {
+    fetchMateriData();
+  }, [fetchMateriData]);
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
@@ -124,37 +164,48 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
       const isOwner = itemToDelete.uploaded_by && itemToDelete.uploaded_by === currentUserId;
 
       if (!isAdmin && !isOwner) {
-        alert('Anda tidak memiliki izin untuk menghapus file ini.');
+        alert('Anda tidak memiliki izin untuk menghapus materi ini.');
         setItemToDelete(null);
         return;
       }
 
-      const bucket = itemToDelete.category || 'materi';
+      if (itemToDelete.sumber_materi === 'ai' || !itemToDelete.file_path) {
+        const { error: dbErr } = await supabase
+          .from('materi')
+          .delete()
+          .eq('id', itemToDelete.id);
 
-      if (itemToDelete.file_path) {
-        const { error: storageErr } = await supabase.storage
-          .from(bucket)
-          .remove([itemToDelete.file_path]);
+        if (dbErr) {
+          throw new Error('Gagal menghapus materi dari database: ' + dbErr.message);
+        }
+      } else {
+        const bucket = itemToDelete.category || 'materi';
 
-        if (storageErr) {
-          throw new Error('Gagal menghapus file dari penyimpanan.');
+        if (itemToDelete.file_path) {
+          const { error: storageErr } = await supabase.storage
+            .from(bucket)
+            .remove([itemToDelete.file_path]);
+
+          if (storageErr) {
+            throw new Error('Gagal menghapus file dari penyimpanan.');
+          }
+        }
+
+        const { error: dbErr } = await supabase
+          .from('materi_files')
+          .delete()
+          .eq('id', itemToDelete.id);
+
+        if (dbErr) {
+          throw new Error('Gagal menghapus data file dari database.');
         }
       }
 
-      const { error: dbErr } = await supabase
-        .from('materi_files')
-        .delete()
-        .eq('id', itemToDelete.id);
-
-      if (dbErr) {
-        throw new Error('Gagal menghapus data file dari database.');
-      }
-
-      alert('File berhasil dihapus.');
+      alert('Materi berhasil dihapus.');
       setMateriList(prev => deduplicateById(prev.filter(i => i.id !== itemToDelete.id)));
       setItemToDelete(null);
     } catch (err: any) {
-      alert(err.message || 'Terjadi kesalahan saat menghapus file.');
+      alert(err.message || 'Terjadi kesalahan saat menghapus materi.');
       setItemToDelete(null);
     }
   };
@@ -286,6 +337,73 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
     }
   };
 
+  const handleCloseModal = () => {
+    setCreationMode('idle');
+    setIsAiDraft(false);
+    setFormData({
+      title: '',
+      subject: 'Matematika',
+      grade: 'Kelas 7',
+      type: 'Materi Teks' as any,
+      topic: '',
+      content: '',
+      tags: ''
+    });
+  };
+
+  const handleSaveMateriAI = async () => {
+    if (!formData.title || !formData.content) {
+      alert('Judul materi dan isi materi tidak boleh kosong.');
+      return;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const currentUserId = user?.id || profile.id;
+
+      const tagsArray = formData.tags
+        ? formData.tags.split(',').map(t => t.trim()).filter(Boolean)
+        : ['AI'];
+
+      const { error } = await supabase
+        .from('materi')
+        .insert({
+          user_id: currentUserId,
+          judul_materi: formData.title,
+          mata_pelajaran: formData.subject,
+          kelas: formData.grade,
+          isi_materi: formData.content,
+          sumber_materi: 'ai',
+          tipe_materi: formData.type || 'Rangkuman AI',
+          tags: tagsArray
+        });
+
+      if (error) {
+        console.error('Error inserting AI material:', error);
+        alert(`Gagal menyimpan materi: ${error.message}`);
+        return;
+      }
+
+      alert('Materi AI berhasil disimpan.');
+      setIsAiDraft(false);
+      setCreationMode('idle');
+      setFormData({
+        title: '',
+        subject: 'Matematika',
+        grade: 'Kelas 7',
+        type: 'Materi Teks' as any,
+        topic: '',
+        content: '',
+        tags: ''
+      });
+      
+      await fetchMateriData();
+    } catch (err: any) {
+      console.error('Exception in handleSaveMateriAI:', err);
+      alert('Terjadi kesalahan tidak terduga: ' + (err.message || err));
+    }
+  };
+
   const generateAI = () => {
 
     if (!formData.topic) {
@@ -295,14 +413,79 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
     setAiLoading(true);
     setTimeout(() => {
       const topic = formData.topic;
+      const subject = formData.subject || 'Mata Pelajaran';
+      const grade = formData.grade || 'Kelas';
+
+      // High-fidelity generation depending on the topic (e.g. Teknik Fotografi)
+      let customContent = '';
+      if (topic.toLowerCase().includes('fotografi')) {
+        customContent = `TUJUAN PEMBELAJARAN:
+- Peserta didik mampu memahami definisi dan prinsip dasar dari Teknik Fotografi secara mendalam.
+- Peserta didik terampil mengenali komponen penting kamera (Aperture, Shutter Speed, ISO) dan menerapkan teknik komposisi gambar yang estetik.
+
+MATERI PEMBELAJARAN:
+Fotografi berasal dari kata Yunani "phos" (cahaya) dan "graphein" (melukis/menulis). Secara harfiah, fotografi adalah proses melukis dengan bantuan media cahaya. Dalam Desain Komunikasi Visual (DKV), fotografi berperan vital sebagai elemen komunikasi visual penyampai pesan secara instan, estetis, dan persuasif.
+
+POIN-POIN PEMBAHASAN UTAMA:
+1. Segitiga Eksposur (The Exposure Triangle):
+   - Aperture (Diafragma): Mengontrol jumlah cahaya yang masuk melalui lensa (diukur dalam f-stop, misal f/1.8, f/8). Memengaruhi Depth of Field (ruang tajam).
+   - Shutter Speed (Kecepatan Rana): Mengontrol durasi sensor kamera menerima cahaya (misal 1/1000s untuk membekukan objek cepat, atau 2s untuk efek aliran air lembut).
+   - ISO: Mengatur tingkat sensitivitas sensor terhadap cahaya. ISO tinggi digunakan pada kondisi gelap namun berisiko memicu noise/bintik pasir pada foto.
+
+2. Komposisi Foto Estetik:
+   - Rule of Thirds (Aturan Sepertiga): Membagi bidang foto menjadi 9 kotak sama besar dan menempatkan point of interest pada titik pertemuan garis.
+   - Leading Lines: Menggunakan garis alami atau buatan di sekitar objek untuk mengarahkan pandangan audiens ke subjek utama.
+   - Framing: Membingkai objek utama menggunakan elemen di sekelilingnya (seperti dahan pohon, celah jendela, atau bayangan).
+
+CONTOH & PENERAPAN PRAKTIS:
+- Fotografi Jurnalistik: Menggunakan Shutter Speed tinggi untuk membekukan aksi dramatis atlet di lapangan olahraga, menyampaikan berita dengan kejujuran visual.
+- Fotografi Studio Produk: Memilih Aperture f/8 untuk memastikan seluruh bagian produk tajam dan jelas, dipadukan dengan pencahayaan softbox terkontrol untuk promosi e-commerce.
+
+RANGKUMAN:
+Teknik fotografi yang baik bukan sekadar menekan tombol rana, melainkan harmoni antara penguasaan teknis pencahayaan (Segitiga Eksposur) dan kepekaan rasa dalam menyusun komposisi visual yang mampu menggerakkan emosi pemirsanya.
+
+LATIHAN & EVALUASI MANDIRI:
+1. Mengapa nilai Aperture kecil (misal f/1.8) menghasilkan latar belakang buram (bokeh)? Jelaskan hubungannya dengan Depth of Field.
+2. Lakukan eksperimen memotret objek yang bergerak cepat dengan pengaturan Shutter Speed 1/50s dan 1/500s. Amati dan tuliskan perbedaan hasilnya!`;
+      } else {
+        // Generic high-fidelity template for any other topics
+        customContent = `TUJUAN PEMBELAJARAN:
+- Peserta didik mampu mengidentifikasi dan menjelaskan konsep dasar dari topik ${topic} secara sistematis.
+- Peserta didik dapat menganalisis serta mengaplikasikan prinsip dasar ${topic} pada skenario pemecahan masalah dunia nyata.
+
+MATERI PEMBELAJARAN:
+Topik mengenai "${topic}" merupakan salah satu pilar kompetensi penting dalam cakupan mata pelajaran ${subject} untuk jenjang ${grade}. Pemahaman komprehensif terhadap materi ini akan membentuk landasan analitis dan praktis yang kokoh bagi peserta didik untuk mengembangkan keterampilan vokasional atau akademik yang relevan.
+
+POIN-POIN PEMBAHASAN UTAMA:
+1. Esensi & Definisi Konseptual:
+   - Pengertian mendalam mengenai terminologi dasar dan sejarah perkembangan singkat dari ${topic}.
+   - Relasi dan relevansi utama materi ini dengan kehidupan sosial, industri, atau teknologi modern saat ini.
+
+2. Structure & Metodologi Kerja:
+   - Memahami alur kerja, anatomi komponen, atau urutan langkah logis dalam mempraktikkan ${topic}.
+   - Aturan emas (golden rules) atau batasan operasional yang wajib dipatuhi untuk mencapai hasil maksimal.
+
+CONTOH & PENERAPAN PRAKTIS:
+- Implementasi Kasus Riil: Bagaimana praktisi profesional di bidang ${subject} memanfaatkan teori ${topic} untuk merancang solusi efisien, meningkatkan produktivitas, atau memproduksi karya kreatif.
+- Studi Kasus Pembelajaran: Contoh sederhana di sekitar lingkungan sekolah yang merepresentasikan bekerjanya hukum atau teori ${topic}.
+
+RANGKUMAN:
+Secaral ringkas, penguasaan terhadap materi ${topic} menuntut keseimbangan antara pemahaman teoretis yang kuat dan ketekunan latihan aplikatif yang berulang. Keberhasilan belajar ditandai dengan kemampuan mengadaptasikan prinsip ini pada konteks yang bervariasi.
+
+LATIHAN & EVALUASI MANDIRI:
+1. Uraikan minimal 3 aspek penting yang membedakan keberhasilan penerapan ${topic} dengan pendekatan konvensional lainnya!
+2. Buatlah peta konsep (concept map) sederhana berdasarkan draf materi di atas untuk mempermudah kegiatan belajar mandiri Anda!`;
+      }
+
       setFormData(prev => ({
         ...prev,
         title: `Materi AI: ${topic}`,
-        content: `PENGANTAR\n${topic} merupakan bagian penting dari mata pelajaran ${prev.subject}.\n\nKONSEP UTAMA\n1. Definisi dan Prinsip Dasar dari ${topic}.\n2. Penerapan ${topic} dalam kehidupan sehari-hari dan relevansinya bagi peserta didik.\n\nLATIHAN/EVALUASI\n- Coba jelaskan kembali apa yang dimaksud dengan ${topic} berdasarkan pemahamanmu sendiri.\n- Berikan 2 contoh konkret penerapan ${topic}.`,
+        content: customContent,
         tags: `${prev.subject}, AI, ${topic}`
       }));
       setAiLoading(false);
-      setCreationMode('manual');
+      setIsAiDraft(true);
+      setComposeTab('manual');
     }, 1500);
   };
 
@@ -442,7 +625,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
           <div className="bg-white rounded-2xl neo-border neo-shadow-lg max-w-3xl w-full p-6 flex flex-col max-h-[90vh]">
             <div className="flex justify-between items-center shrink-0 mb-4">
               <h3 className="text-lg font-black text-gray-900 uppercase">Penyusunan Materi</h3>
-              <button onClick={() => setCreationMode('idle')} className="p-1 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+              <button onClick={handleCloseModal} className="p-1 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             
             <div className="flex gap-2 mb-4 shrink-0 p-1 bg-[#FAF6F0] rounded-xl border-2 border-gray-900">
@@ -468,7 +651,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
             
             <div className="overflow-y-auto flex-1 pr-2">
               {composeTab === 'manual' && (
-                <form onSubmit={handleCreate} className="space-y-4 text-xs pb-4">
+                <form onSubmit={(e) => { e.preventDefault(); isAiDraft ? handleSaveMateriAI() : handleCreate(); }} className="space-y-4 text-xs pb-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block font-bold mb-1">Judul Materi <span className="text-red-500">*</span></label>
@@ -505,8 +688,10 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
                     <input className="w-full p-2 border-2 border-gray-900 rounded-lg" placeholder="Cth: Fotosintesis, Biologi, Ujian" value={formData.tags} onChange={e => setFormData({...formData, tags: e.target.value})} />
                   </div>
                   <div className="flex gap-3 pt-4 sticky bottom-0 bg-white p-2 border-t-2 border-gray-100">
-                    <button type="submit" className="flex-1 p-3 bg-[#FFD166] text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-[#ffdf8f]">Simpan Materi</button>
-                    <button type="button" onClick={() => setCreationMode('idle')} className="flex-1 p-3 bg-gray-200 text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-gray-300">Batal</button>
+                    <button type="submit" className={`flex-1 p-3 text-gray-900 rounded-xl font-bold uppercase neo-border ${isAiDraft ? 'bg-[#FF8B7B] hover:bg-[#ff9d90] shadow-[3px_3px_0_rgba(0,0,0,1)] ring-2 ring-gray-900 animate-pulse' : 'bg-[#FFD166] hover:bg-[#ffdf8f]'}`}>
+                      {isAiDraft ? 'SIMPAN MATERI AI' : 'Simpan Materi'}
+                    </button>
+                    <button type="button" onClick={handleCloseModal} className="flex-1 p-3 bg-gray-200 text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-gray-300">Batal</button>
                   </div>
                 </form>
               )}
@@ -539,7 +724,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
                     <button onClick={generateAI} disabled={aiLoading} className="flex-1 p-3 bg-gray-900 text-white rounded-xl font-bold uppercase disabled:opacity-50 cursor-pointer hover:bg-gray-800">
                       {aiLoading ? 'Menyusun materi...' : 'Generate AI'}
                     </button>
-                    <button type="button" onClick={() => setCreationMode('idle')} className="flex-1 p-3 bg-gray-200 text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-gray-300">Batal</button>
+                    <button type="button" onClick={handleCloseModal} className="flex-1 p-3 bg-gray-200 text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-gray-300">Batal</button>
                   </div>
                 </div>
               )}
@@ -641,7 +826,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
                     >
                       {isUploading ? 'Menyimpan...' : 'Upload & Simpan'}
                     </button>
-                    <button type="button" onClick={() => setCreationMode('idle')} disabled={isUploading} className="flex-1 p-3 bg-gray-200 text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-gray-300">Batal</button>
+                    <button type="button" onClick={handleCloseModal} disabled={isUploading} className="flex-1 p-3 bg-gray-200 text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-gray-300">Batal</button>
                   </div>
                 </div>
               )}
@@ -713,11 +898,11 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
                 <button onClick={() => setViewingMateri(item)} className="flex-1 py-2 bg-gray-900 text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer hover:bg-gray-800 transition-colors">
                   Buka / Download Materi
                 </button>
-                {item.file_path && (profile.role?.toLowerCase() === 'admin' || item.uploaded_by === profile.id) && (
+                {(profile.role?.toLowerCase() === 'admin' || item.uploaded_by === profile.id) && (
                   <button 
                     onClick={() => setItemToDelete(item)}
                     className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-600 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors flex items-center justify-center gap-1"
-                    title="Hapus File"
+                    title="Hapus Materi"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -731,12 +916,12 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
       {itemToDelete && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl neo-border neo-shadow-lg max-w-md w-full p-6 space-y-4">
-            <h3 className="text-lg font-black text-gray-900 uppercase">HAPUS FILE?</h3>
+            <h3 className="text-lg font-black text-gray-900 uppercase">HAPUS MATERI?</h3>
             <p className="text-xs text-gray-600 leading-relaxed">
               Apakah Anda yakin ingin menghapus:
               <br />
               <strong className="text-gray-900 block my-1 font-bold text-sm">"{itemToDelete.title}"</strong>
-              File akan dihapus dari penyimpanan dan tidak dapat diakses lagi.
+              Materi ini akan dihapus secara permanen dari database.
             </p>
             <div className="flex gap-3 pt-2">
               <button
