@@ -18,6 +18,7 @@ import {
 interface ChatMessageItemProps {
   msg: ChatMessage;
   currentUserId: string;
+  currentUserRole?: 'admin' | 'guru';
   recipientId?: string;
   onOpenImageModal: (url: string, name?: string) => void;
   onDeleteMessage?: (msgId: string) => void;
@@ -53,11 +54,13 @@ function renderMessageText(text: string) {
 export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({
   msg,
   currentUserId,
+  currentUserRole,
   recipientId,
   onOpenImageModal,
   onDeleteMessage
 }) => {
   const isSelf = msg.sender_id === currentUserId;
+  const canDelete = isSelf || currentUserRole === 'admin';
   const isRetracted = msg.message_type === 'retracted' || msg.is_deleted === true;
   const [showConfirmRetract, setShowConfirmRetract] = useState(false);
 
@@ -333,12 +336,12 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({
           </div>
         </div>
 
-        {/* Action Button: Retract message (Sender only) */}
-        {isSelf && !isRetracted && onDeleteMessage && (
+        {/* Action Button: Retract message (Sender or Admin) */}
+        {canDelete && !isRetracted && onDeleteMessage && (
           <div className="flex items-center justify-end gap-1 px-1">
             {showConfirmRetract ? (
               <div className="flex items-center gap-1.5 bg-white p-1 px-2.5 rounded-xl neo-border-thin text-[10px] font-bold shadow-sm animate-fadeIn">
-                <span className="text-gray-700 font-black">Tarik pesan untuk semua?</span>
+                <span className="text-gray-700 font-black">Tarik pesan ini?</span>
                 <button
                   onClick={() => {
                     onDeleteMessage(msg.id);
@@ -346,13 +349,13 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({
                   }}
                   className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-black cursor-pointer shadow-xs transition-colors"
                 >
-                  Tarik
+                  TARIK PESAN
                 </button>
                 <button
                   onClick={() => setShowConfirmRetract(false)}
                   className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold cursor-pointer transition-colors"
                 >
-                  Batal
+                  BATAL
                 </button>
               </div>
             ) : (

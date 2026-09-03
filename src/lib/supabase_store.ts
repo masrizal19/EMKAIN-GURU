@@ -451,7 +451,7 @@ export async function sendMessageDirect(
   } as ChatMessage;
 }
 
-export async function retractMessageDirect(msgId: string, currentUserId: string): Promise<boolean> {
+export async function deleteMessageDirect(msgId: string, currentUserId: string, currentUserRole?: string): Promise<boolean> {
   try {
     // 1. Fetch message details to find any attachments to remove from Supabase Storage
     const { data: msg } = await supabase
@@ -460,9 +460,10 @@ export async function retractMessageDirect(msgId: string, currentUserId: string)
       .eq('id', msgId)
       .maybeSingle();
 
-    if (!msg) return false;
-    if (msg.sender_id !== currentUserId) {
-      console.error('[SUPABASE_STORE] Unauthorized retract attempt');
+    if (!msg) return true; // Already deleted
+    
+    if (msg.sender_id !== currentUserId && currentUserRole !== 'admin') {
+      console.error('[SUPABASE_STORE] Unauthorized delete attempt');
       return false;
     }
 
@@ -493,52 +494,29 @@ export async function retractMessageDirect(msgId: string, currentUserId: string)
     }
 
     if (pathsToRemove.length > 0) {
-      await supabase.storage.from('chat-attachments').remove(pathsToRemove);
+      const { error: storageError } = await supabase.storage.from('chat-attachments').remove(pathsToRemove);
+      if (storageError) {
+        console.error('[SUPABASE_STORE] Failed to remove storage objects:', storageError);
+        // Continue with database deletion even if storage fails, assuming file doesn't exist or cleanup will be manual
+      }
     }
 
-    // 3. Mark message as retracted in database
+    // 3. Delete message from database
     const { error } = await supabase
       .from('messages')
-      .update({
-        message_type: 'retracted',
-        message: '',
-        attachment_url: null,
-        attachment_name: null,
-        attachment_size: null,
-        attachment_mime_type: null,
-        link_url: null,
-        link_title: null,
-        link_description: null
-      })
-      .eq('id', msgId)
-      .eq('sender_id', currentUserId);
+      .delete()
+      .eq('id', msgId);
 
     if (error) {
-      console.error('[SUPABASE_STORE] retractMessageDirect error:', error);
+      console.error('[SUPABASE_STORE] deleteMessageDirect error:', error);
       return false;
     }
 
     return true;
   } catch (err) {
-    console.error('[SUPABASE_STORE] retractMessageDirect exception:', err);
+    console.error('[SUPABASE_STORE] deleteMessageDirect exception:', err);
     return false;
   }
-}
-
-export async function deleteMessageDirect(msgId: string, currentUserId?: string): Promise<boolean> {
-  if (currentUserId) {
-    return retractMessageDirect(msgId, currentUserId);
-  }
-  const { error } = await supabase
-    .from('messages')
-    .delete()
-    .eq('id', msgId);
-
-  if (error) {
-    console.error('[SUPABASE_STORE] deleteMessageDirect error:', error);
-    return false;
-  }
-  return true;
 }
 
 // -------------------------------------------------------------

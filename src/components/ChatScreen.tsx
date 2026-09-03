@@ -14,7 +14,6 @@ import {
   fetchMessagesDirect,
   startDirectConversationDirect,
   sendMessageDirect,
-  retractMessageDirect,
   deleteMessageDirect,
   uploadChatFileToStorage,
   markMessagesAsReadDirect,
@@ -793,30 +792,16 @@ export default function ChatScreen({
     }
   };
 
-  // Retract message (Sender only)
+  // Retract message
   const handleDeleteMessage = async (msgId: string) => {
     try {
-      const ok = await retractMessageDirect(msgId, profile.id);
+      const ok = await deleteMessageDirect(msgId, profile.id, profile.role);
       if (ok && isMountedRef.current) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === msgId
-              ? {
-                  ...m,
-                  message_type: 'retracted',
-                  message: '',
-                  attachment_url: null,
-                  attachments: [],
-                  link_url: null,
-                  is_deleted: true
-                }
-              : m
-          )
-        );
+        setMessages((prev) => prev.filter((m) => m.id !== msgId));
         fetchConversations(true);
       }
     } catch (err) {
-      console.error('Error retracting message:', err);
+      console.error('Error deleting message:', err);
     }
   };
 
@@ -1166,6 +1151,7 @@ export default function ChatScreen({
                       key={msg.id}
                       msg={msg}
                       currentUserId={profile.id}
+                      currentUserRole={profile.role}
                       recipientId={selectedConversation.other_user?.id}
                       onOpenImageModal={(url, name) => setActiveLightboxImage({ url, name })}
                       onDeleteMessage={handleDeleteMessage}
