@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 
 function deduplicateById<T extends { id?: any }>(items: T[]): T[] {
+  if (!items || !Array.isArray(items)) return [];
   const seen = new Set<string>();
   const result: T[] = [];
   for (const item of items) {

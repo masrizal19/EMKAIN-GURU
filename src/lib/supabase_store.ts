@@ -132,7 +132,7 @@ export async function fetchConversationsDirect(currentUserId: string): Promise<C
     const lastMsg = convMsgs.length > 0 ? convMsgs[convMsgs.length - 1] : null;
 
     // Calculate unread count (messages sent by others not in read_by)
-    const unreadCount = convMsgs.filter(
+    const unreadCount = (convMsgs || []).filter(
       m => m.sender_id !== currentUserId && (!m.read_by || !m.read_by.includes(currentUserId))
     ).length;
 
@@ -289,7 +289,7 @@ export async function markMessagesAsReadDirect(convId: string, currentUserId: st
       .eq('conversation_id', convId);
 
     if (data && data.length > 0) {
-      const toUpdate = data.filter(m => m.sender_id !== currentUserId && (!m.read_by || !m.read_by.includes(currentUserId)));
+      const toUpdate = (data || []).filter(m => m.sender_id !== currentUserId && (!m.read_by || !m.read_by.includes(currentUserId)));
       for (const m of toUpdate) {
         const updatedReadBy = Array.from(new Set([...(m.read_by || []), currentUserId]));
         await supabase
@@ -501,10 +501,15 @@ export async function deleteMessageDirect(msgId: string, currentUserId: string, 
       }
     }
 
-    // 3. Delete message from database
+    // 3. Update message in database to retracted state
     const { error } = await supabase
       .from('messages')
-      .delete()
+      .update({
+        message_type: 'retracted',
+        message: '',
+        attachment_url: null,
+        is_deleted: true
+      })
       .eq('id', msgId);
 
     if (error) {
@@ -544,7 +549,7 @@ export async function fetchPostsDirect(currentUserId: string): Promise<ForumPost
     });
   }
 
-  return posts.map(p => {
+  return (posts || []).map(p => {
     const postLikes = (likes || []).filter(l => l.post_id === p.id);
     const postComments = (comments || []).filter(c => c.post_id === p.id);
     const userHasLiked = postLikes.some(l => l.user_id === currentUserId);
