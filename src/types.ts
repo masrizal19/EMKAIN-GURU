@@ -35,6 +35,25 @@ export enum QuestionType {
   ESSAY = 'ESSAY',
 }
 
+export interface HeaderSettings {
+  id?: string;
+  config_key: string;
+  brand_name: string;
+  brand_subtitle: string;
+  header_title: string;
+  bg_color: string;
+  text_color: string;
+  border_color: string;
+  border_width: string;
+  border_radius: string;
+  show_logo: boolean;
+  show_brand_name: boolean;
+  show_subtitle: boolean;
+  logo_path: string | null;
+  logo_url: string | null;
+  updated_at?: string;
+}
+
 export interface UserProfile {
   id: string;
   username: string;

@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { UserProfile } from '../types';
 import { getApiUrl } from '../lib/api';
+import AdminHeaderSettings from './AdminHeaderSettings';
 import { 
   Search, 
   UserPlus, 
@@ -31,6 +32,7 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
+  const [activeTab, setActiveTab] = useState<'guru' | 'header'>('guru');
   const [teachers, setTeachers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -458,25 +460,51 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
             ADMINISTRATOR PANEL <Sparkles className="w-6 h-6 text-[#FF8B7B]" />
           </h1>
           <p className="text-gray-600 font-bold text-sm mt-1">
-            Kelola data akun tenaga pengajar, perizinan akses, dan audit profil guru.
+            Kelola data akun tenaga pengajar, perizinan akses, dan pengaturan sistem.
           </p>
         </div>
         
+        {activeTab === 'guru' && (
+          <button
+            onClick={() => {
+              setShowCreateForm(!showCreateForm);
+              setCreatedTeacherInfo(null);
+              setCreateError('');
+            }}
+            className="px-5 py-3.5 bg-[#FF8B7B] text-gray-900 neo-border rounded-xl font-black text-xs tracking-wider uppercase flex items-center gap-1.5 cursor-pointer neo-shadow-sm hover:bg-[#ff9f8f]"
+            id="toggle-add-guru-btn"
+          >
+            <Plus className="w-4 h-4" />
+            <span>TAMBAH GURU BARU</span>
+          </button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6 border-b-2 border-gray-900 pb-4">
         <button
-          onClick={() => {
-            setShowCreateForm(!showCreateForm);
-            setCreatedTeacherInfo(null);
-            setCreateError('');
-          }}
-          className="px-5 py-3.5 bg-[#FF8B7B] text-gray-900 neo-border rounded-xl font-black text-xs tracking-wider uppercase flex items-center gap-1.5 cursor-pointer neo-shadow-sm hover:bg-[#ff9f8f]"
-          id="toggle-add-guru-btn"
+          onClick={() => setActiveTab('guru')}
+          className={`px-4 py-2 font-black text-xs tracking-wider uppercase rounded-lg neo-border-thin transition-colors ${
+            activeTab === 'guru' ? 'bg-[#FFD166] text-gray-900' : 'bg-white text-gray-500 hover:bg-gray-50'
+          }`}
         >
-          <Plus className="w-4 h-4" />
-          <span>TAMBAH GURU BARU</span>
+          Manajemen Guru
+        </button>
+        <button
+          onClick={() => setActiveTab('header')}
+          className={`px-4 py-2 font-black text-xs tracking-wider uppercase rounded-lg neo-border-thin transition-colors ${
+            activeTab === 'header' ? 'bg-[#FFD166] text-gray-900' : 'bg-white text-gray-500 hover:bg-gray-50'
+          }`}
+        >
+          Pengaturan Header
         </button>
       </div>
 
-      {/* Analytics Counter Row */}
+      {activeTab === 'header' ? (
+        <AdminHeaderSettings />
+      ) : (
+        <>
+          {/* Analytics Counter Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8" id="admin-stats-row">
         <div className="bg-white rounded-xl neo-border p-5 text-left" id="stat-total">
           <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Total Guru Terdaftar</span>
@@ -1071,6 +1099,8 @@ export default function AdminPanel({ onBack, initialAction }: AdminPanelProps) {
             </button>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

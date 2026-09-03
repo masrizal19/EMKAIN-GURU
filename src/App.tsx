@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { AppScreen, Difficulty, QuestionType, GeneratedSet, RecentWork, UserProfile } from './types';
+import { HeaderSettings, AppScreen, Difficulty, QuestionType, GeneratedSet, RecentWork, UserProfile } from './types';
 import { INITIAL_RECENT_WORKS, SAMPLE_QUESTION_SETS, generateQuestions } from './data';
 import { getApiUrl } from './lib/api';
 import { isProductionStaticBuild, updatePresenceDirect } from './lib/supabase_store';
@@ -51,6 +51,7 @@ export default function App() {
   // Authentication & Session state
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [headerSettings, setHeaderSettings] = useState<HeaderSettings | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
 
@@ -64,6 +65,31 @@ export default function App() {
   // Chat & Presence State
   const [activeChatTargetUser, setActiveChatTargetUser] = useState<UserProfile | null>(null);
   const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+
+  const fetchHeaderSettings = async () => {
+    try {
+      if (!isSupabaseConfigured) return;
+      const { data, error } = await supabase
+        .from('header_settings')
+        .select('*')
+        .eq('config_key', 'main')
+        .maybeSingle();
+
+      if (!error && data) {
+        setHeaderSettings(data);
+      }
+    } catch (err) {
+      console.error('Error fetching header settings:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchHeaderSettings();
+    window.addEventListener('headerSettingsUpdated', fetchHeaderSettings);
+    return () => {
+      window.removeEventListener('headerSettingsUpdated', fetchHeaderSettings);
+    };
+  }, []);
 
   // Form parameters saved when submitting
   const [pendingGenParams, setPendingGenParams] = useState<{
@@ -684,20 +710,62 @@ export default function App() {
   // D. SHARED LAYOUT FOR AUTHENTICATED PORTALS (Dashboard, Generate Soal, Questions Ready, Profile, Community, Chat, Admin Panel)
   return (
     <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-0 px-0 md:py-6 md:px-4 lg:px-8 flex items-center justify-center font-body" id="authenticated-workspace">
-      <div className="flex flex-col lg:flex-row w-full max-w-7xl bg-[#FAF6F0] rounded-none md:rounded-2xl border-0 md:border-2 border-gray-900 shadow-none md:shadow-lg overflow-hidden min-h-screen md:min-h-[90vh]" id="app-workspace-layout">
+      <div 
+        className="flex flex-col lg:flex-row w-full max-w-7xl bg-[#FAF6F0] rounded-none md:rounded-2xl border-0 md:border-2 border-gray-900 shadow-none md:shadow-lg overflow-hidden min-h-screen md:min-h-[90vh]" 
+        id="app-workspace-layout"
+        style={headerSettings ? {
+          '--tw-border-opacity': 1,
+          borderColor: headerSettings.border_color,
+        } as React.CSSProperties : undefined}
+      >
         
         {/* MOBILE HEADER */}
-        <header className="lg:hidden flex items-center justify-between bg-[#FAF6F0] px-4 py-3 border-b-2 border-gray-900 sticky top-0 z-30" id="mobile-app-header">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-full bg-[#FFD166] neo-border-thin flex items-center justify-center overflow-hidden">
-              <span className="text-xl">{profile?.avatar_url || '👩‍🏫'}</span>
-            </div>
-            <div>
-              <h1 className="text-sm font-black font-display text-gray-900 leading-none">EMKAIN GURU</h1>
-              <span className="text-[8px] font-black uppercase tracking-widest text-gray-500 block">Edu-Creative Portal</span>
+        <header 
+          className="lg:hidden flex items-center justify-between px-4 py-3 sticky top-0 z-30" 
+          id="mobile-app-header"
+          style={{ 
+            backgroundColor: headerSettings?.bg_color || '#FAF6F0',
+            borderBottom: `${headerSettings?.border_width || '2px'} solid ${headerSettings?.border_color || '#111827'}`,
+            borderRadius: headerSettings?.border_radius && headerSettings.border_radius !== '0' ? `${headerSettings.border_radius} ${headerSettings.border_radius} 0 0` : undefined
+          }}
+        >
+          <div className="flex items-center gap-2 flex-1">
+            {(headerSettings ? headerSettings.show_logo : true) && (
+              <div 
+                className="w-9 h-9 rounded-full neo-border-thin flex items-center justify-center overflow-hidden flex-shrink-0"
+                style={{ backgroundColor: headerSettings?.bg_color || '#FFD166' }}
+              >
+                {headerSettings?.logo_url ? (
+                  <img src={headerSettings.logo_url} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-xl">👩‍🏫</span>
+                )}
+              </div>
+            )}
+            <div className="hidden sm:block">
+              {(headerSettings ? headerSettings.show_brand_name : true) && (
+                <h1 
+                  className="text-sm font-black font-display leading-none"
+                  style={{ color: headerSettings?.text_color || '#111827' }}
+                >
+                  {headerSettings?.brand_name || 'EMKAIN GURU'}
+                </h1>
+              )}
+              {(headerSettings ? headerSettings.show_subtitle : true) && (
+                <span className="text-[8px] font-black uppercase tracking-widest block opacity-70" style={{ color: headerSettings?.text_color || '#6B7280' }}>
+                  {headerSettings?.brand_subtitle || 'Edu-Creative Portal'}
+                </span>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          
+          {headerSettings?.header_title && (
+            <div className="flex-1 text-center font-black text-sm tracking-wider uppercase font-display hidden xs:block truncate px-2" style={{ color: headerSettings.text_color || '#111827' }}>
+              {headerSettings.header_title}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 flex-1 justify-end">
             {profile?.role === 'admin' && (
               <button 
                 onClick={() => { 
@@ -721,16 +789,46 @@ export default function App() {
         </header>
 
         {/* SHARED STABLE SIDEBAR */}
-        <aside className="hidden lg:flex w-full lg:w-[280px] bg-[#FAF6F0] flex-col justify-between lg:border-r-2 lg:border-gray-900 p-6" id="app-workspace-sidebar">
+        <aside 
+          className="hidden lg:flex w-full lg:w-[280px] flex-col justify-between p-6" 
+          id="app-workspace-sidebar"
+          style={{ 
+            backgroundColor: headerSettings?.bg_color || '#FAF6F0',
+            borderRight: `${headerSettings?.border_width || '2px'} solid ${headerSettings?.border_color || '#111827'}`
+          }}
+        >
           <div>
             {/* Logo Brand Header */}
             <div className="flex items-center gap-3 mb-8" id="sidebar-brand-header">
-              <div className="w-12 h-12 rounded-full bg-[#FFD166] neo-border-thin flex items-center justify-center overflow-hidden">
-                <span className="text-2xl">{profile?.avatar_url || '👩‍🏫'}</span>
-              </div>
+              {(headerSettings ? headerSettings.show_logo : true) && (
+                <div 
+                  className="w-12 h-12 rounded-full neo-border-thin flex items-center justify-center overflow-hidden flex-shrink-0"
+                  style={{ backgroundColor: headerSettings?.bg_color || '#FFD166' }}
+                >
+                  {headerSettings?.logo_url ? (
+                    <img src={headerSettings.logo_url} alt="Logo" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-2xl">👩‍🏫</span>
+                  )}
+                </div>
+              )}
               <div>
-                <h2 className="text-lg font-black font-display tracking-tight text-gray-900 leading-none">EMKAIN GURU</h2>
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-gray-500 block mt-0.5">Edu-Creative Portal</span>
+                {(headerSettings ? headerSettings.show_brand_name : true) && (
+                  <h2 
+                    className="text-lg font-black font-display tracking-tight leading-none"
+                    style={{ color: headerSettings?.text_color || '#111827' }}
+                  >
+                    {headerSettings?.brand_name || 'EMKAIN GURU'}
+                  </h2>
+                )}
+                {(headerSettings ? headerSettings.show_subtitle : true) && (
+                  <span 
+                    className="text-[10px] font-extrabold uppercase tracking-widest block mt-0.5 opacity-70"
+                    style={{ color: headerSettings?.text_color || '#6B7280' }}
+                  >
+                    {headerSettings?.brand_subtitle || 'Edu-Creative Portal'}
+                  </span>
+                )}
               </div>
             </div>
 
