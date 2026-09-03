@@ -49,6 +49,8 @@ export interface HeaderSettings {
   show_logo: boolean;
   show_brand_name: boolean;
   show_subtitle: boolean;
+  show_logo_circle: boolean;
+  show_default_title: boolean;
   logo_path: string | null;
   logo_url: string | null;
   updated_at?: string;

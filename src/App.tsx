@@ -711,7 +711,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-0 px-0 md:py-6 md:px-4 lg:px-8 flex items-center justify-center font-body" id="authenticated-workspace">
       <div 
-        className="flex flex-col lg:flex-row w-full max-w-7xl bg-[#FAF6F0] rounded-none md:rounded-2xl border-0 md:border-2 border-gray-900 shadow-none md:shadow-lg overflow-hidden min-h-screen md:min-h-[90vh]" 
+        className="flex flex-col lg:flex-row w-full max-w-7xl bg-[#FAF6F0] rounded-none md:rounded-2xl border-0 md:border-2 border-gray-900 shadow-none md:shadow-lg overflow-hidden min-h-screen md:h-[90vh] md:max-h-[90vh]" 
         id="app-workspace-layout"
         style={headerSettings ? {
           '--tw-border-opacity': 1,
@@ -732,34 +732,40 @@ export default function App() {
           <div className="flex items-center gap-2 flex-1">
             {(headerSettings ? headerSettings.show_logo : true) && (
               <div 
-                className="w-9 h-9 rounded-full neo-border-thin flex items-center justify-center overflow-hidden flex-shrink-0"
-                style={{ backgroundColor: headerSettings?.bg_color || '#FFD166' }}
+                className={`flex items-center justify-center overflow-hidden flex-shrink-0 ${
+                  (headerSettings?.show_logo_circle ?? true)
+                    ? 'w-9 h-9 rounded-full neo-border-thin'
+                    : 'w-16 h-9 rounded-lg px-1'
+                }`}
+                style={{ backgroundColor: (headerSettings?.show_logo_circle ?? true) ? (headerSettings?.bg_color || '#FFD166') : 'transparent' }}
               >
                 {headerSettings?.logo_url ? (
-                  <img src={headerSettings.logo_url} alt="Logo" className="w-full h-full object-cover" />
+                  <img src={headerSettings.logo_url} alt="Logo" className="w-full h-full object-contain" />
                 ) : (
                   <span className="text-xl">👩‍🏫</span>
                 )}
               </div>
             )}
-            <div className="hidden sm:block">
-              {(headerSettings ? headerSettings.show_brand_name : true) && (
-                <h1 
-                  className="text-sm font-black font-display leading-none"
-                  style={{ color: headerSettings?.text_color || '#111827' }}
-                >
-                  {headerSettings?.brand_name || 'EMKAIN GURU'}
-                </h1>
-              )}
-              {(headerSettings ? headerSettings.show_subtitle : true) && (
-                <span className="text-[8px] font-black uppercase tracking-widest block opacity-70" style={{ color: headerSettings?.text_color || '#6B7280' }}>
-                  {headerSettings?.brand_subtitle || 'Edu-Creative Portal'}
-                </span>
-              )}
-            </div>
+            {((headerSettings?.show_brand_name ?? true) || (headerSettings?.show_subtitle ?? true)) && (
+              <div className="hidden sm:block">
+                {(headerSettings?.show_brand_name ?? true) && (
+                  <h1 
+                    className="text-sm font-black font-display leading-none"
+                    style={{ color: headerSettings?.text_color || '#111827' }}
+                  >
+                    {headerSettings?.brand_name || 'EMKAIN GURU'}
+                  </h1>
+                )}
+                {(headerSettings?.show_subtitle ?? true) && (
+                  <span className="text-[8px] font-black uppercase tracking-widest block opacity-70 mt-0.5" style={{ color: headerSettings?.text_color || '#6B7280' }}>
+                    {headerSettings?.brand_subtitle || 'Edu-Creative Portal'}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           
-          {headerSettings?.header_title && (
+          {headerSettings?.header_title && (headerSettings?.show_default_title ?? true) && (
             <div className="flex-1 text-center font-black text-sm tracking-wider uppercase font-display hidden xs:block truncate px-2" style={{ color: headerSettings.text_color || '#111827' }}>
               {headerSettings.header_title}
             </div>
@@ -790,7 +796,7 @@ export default function App() {
 
         {/* SHARED STABLE SIDEBAR */}
         <aside 
-          className="hidden lg:flex w-full lg:w-[280px] flex-col justify-between p-6" 
+          className="hidden lg:flex w-full lg:w-[280px] flex-col justify-between p-6 flex-shrink-0 overflow-y-auto" 
           id="app-workspace-sidebar"
           style={{ 
             backgroundColor: headerSettings?.bg_color || '#FAF6F0',
@@ -802,34 +808,40 @@ export default function App() {
             <div className="flex items-center gap-3 mb-8" id="sidebar-brand-header">
               {(headerSettings ? headerSettings.show_logo : true) && (
                 <div 
-                  className="w-12 h-12 rounded-full neo-border-thin flex items-center justify-center overflow-hidden flex-shrink-0"
-                  style={{ backgroundColor: headerSettings?.bg_color || '#FFD166' }}
+                  className={`flex items-center justify-center overflow-hidden flex-shrink-0 ${
+                    (headerSettings?.show_logo_circle ?? true)
+                      ? 'w-12 h-12 rounded-full neo-border-thin'
+                      : 'w-20 h-12 rounded-xl px-1'
+                  }`}
+                  style={{ backgroundColor: (headerSettings?.show_logo_circle ?? true) ? (headerSettings?.bg_color || '#FFD166') : 'transparent' }}
                 >
                   {headerSettings?.logo_url ? (
-                    <img src={headerSettings.logo_url} alt="Logo" className="w-full h-full object-cover" />
+                    <img src={headerSettings.logo_url} alt="Logo" className="w-full h-full object-contain" />
                   ) : (
                     <span className="text-2xl">👩‍🏫</span>
                   )}
                 </div>
               )}
-              <div>
-                {(headerSettings ? headerSettings.show_brand_name : true) && (
-                  <h2 
-                    className="text-lg font-black font-display tracking-tight leading-none"
-                    style={{ color: headerSettings?.text_color || '#111827' }}
-                  >
-                    {headerSettings?.brand_name || 'EMKAIN GURU'}
-                  </h2>
-                )}
-                {(headerSettings ? headerSettings.show_subtitle : true) && (
-                  <span 
-                    className="text-[10px] font-extrabold uppercase tracking-widest block mt-0.5 opacity-70"
-                    style={{ color: headerSettings?.text_color || '#6B7280' }}
-                  >
-                    {headerSettings?.brand_subtitle || 'Edu-Creative Portal'}
-                  </span>
-                )}
-              </div>
+              {((headerSettings?.show_brand_name ?? true) || (headerSettings?.show_subtitle ?? true)) && (
+                <div>
+                  {(headerSettings?.show_brand_name ?? true) && (
+                    <h2 
+                      className="text-lg font-black font-display tracking-tight leading-none"
+                      style={{ color: headerSettings?.text_color || '#111827' }}
+                    >
+                      {headerSettings?.brand_name || 'EMKAIN GURU'}
+                    </h2>
+                  )}
+                  {(headerSettings?.show_subtitle ?? true) && (
+                    <span 
+                      className="text-[10px] font-extrabold uppercase tracking-widest block mt-0.5 opacity-70"
+                      style={{ color: headerSettings?.text_color || '#6B7280' }}
+                    >
+                      {headerSettings?.brand_subtitle || 'Edu-Creative Portal'}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Teacher Greeting */}

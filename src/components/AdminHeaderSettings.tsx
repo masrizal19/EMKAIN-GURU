@@ -17,6 +17,8 @@ export default function AdminHeaderSettings() {
     show_logo: true,
     show_brand_name: true,
     show_subtitle: true,
+    show_logo_circle: true,
+    show_default_title: true,
     logo_path: null,
     logo_url: null,
   });
@@ -199,12 +201,20 @@ export default function AdminHeaderSettings() {
               Tampilkan Logo
             </label>
             <label className="flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input type="checkbox" name="show_logo_circle" checked={settings.show_logo_circle ?? true} onChange={handleChange} className="w-4 h-4 border-2 border-gray-900 rounded" />
+              Lingkaran Logo
+            </label>
+            <label className="flex items-center gap-2 text-xs font-bold cursor-pointer">
               <input type="checkbox" name="show_brand_name" checked={settings.show_brand_name} onChange={handleChange} className="w-4 h-4 border-2 border-gray-900 rounded" />
               Tampilkan Nama Brand
             </label>
             <label className="flex items-center gap-2 text-xs font-bold cursor-pointer">
               <input type="checkbox" name="show_subtitle" checked={settings.show_subtitle} onChange={handleChange} className="w-4 h-4 border-2 border-gray-900 rounded" />
               Tampilkan Subtitle Brand
+            </label>
+            <label className="flex items-center gap-2 text-xs font-bold cursor-pointer">
+              <input type="checkbox" name="show_default_title" checked={settings.show_default_title ?? true} onChange={handleChange} className="w-4 h-4 border-2 border-gray-900 rounded" />
+              Tampilkan Judul Halaman Default
             </label>
           </div>
         </div>
