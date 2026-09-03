@@ -51,6 +51,8 @@ export interface HeaderSettings {
   show_subtitle: boolean;
   show_logo_circle: boolean;
   show_default_title: boolean;
+  content_bg_radius: string;
+  content_bg_width: string;
   logo_path: string | null;
   logo_url: string | null;
   updated_at?: string;

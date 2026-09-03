@@ -19,6 +19,8 @@ export default function AdminHeaderSettings() {
     show_subtitle: true,
     show_logo_circle: true,
     show_default_title: true,
+    content_bg_radius: '1rem',
+    content_bg_width: '100%',
     logo_path: null,
     logo_url: null,
   });
@@ -42,7 +44,11 @@ export default function AdminHeaderSettings() {
       if (error) {
         console.error('Error fetching header settings:', error);
       } else if (data) {
-        setSettings(data);
+        setSettings({
+          ...data,
+          content_bg_radius: data.content_bg_radius ?? '1rem',
+          content_bg_width: data.content_bg_width ?? '100%',
+        });
       }
     } catch (err) {
       console.error('Error in fetchSettings:', err);
@@ -64,12 +70,23 @@ export default function AdminHeaderSettings() {
     try {
       const { data, error } = await supabase
         .from('header_settings')
-        .upsert({ ...settings, updated_at: new Date().toISOString() }, { onConflict: 'config_key' })
+        .upsert({ 
+          ...settings, 
+          content_bg_radius: settings.content_bg_radius || '1rem',
+          content_bg_width: settings.content_bg_width || '100%',
+          updated_at: new Date().toISOString() 
+        }, { onConflict: 'config_key' })
         .select()
         .maybeSingle();
 
       if (error) throw error;
-      if (data) setSettings(data);
+      if (data) {
+        setSettings({
+          ...data,
+          content_bg_radius: data.content_bg_radius ?? '1rem',
+          content_bg_width: data.content_bg_width ?? '100%',
+        });
+      }
       
       alert('Pengaturan header berhasil disimpan!');
       // Dispatch custom event so App.tsx can update
@@ -259,6 +276,16 @@ export default function AdminHeaderSettings() {
           <div>
             <label className="block text-xs font-bold text-gray-900 mb-1">Border Radius</label>
             <input type="text" name="border_radius" value={settings.border_radius} onChange={handleChange} placeholder="Cth: 1rem, 0.5rem, 0" className="w-full p-2 border-2 border-gray-900 rounded-lg font-bold text-xs" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-900 mb-1">Radius Background Konten</label>
+            <input type="text" name="content_bg_radius" value={settings.content_bg_radius ?? '1rem'} onChange={handleChange} placeholder="Cth: 1rem, 1.5rem, 24px" className="w-full p-2 border-2 border-gray-900 rounded-lg font-bold text-xs" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-900 mb-1">Ukuran Background Konten</label>
+            <input type="text" name="content_bg_width" value={settings.content_bg_width ?? '100%'} onChange={handleChange} placeholder="Cth: 100%, 95%, min(1200px, 100%)" className="w-full p-2 border-2 border-gray-900 rounded-lg font-bold text-xs" />
           </div>
         </div>
 
