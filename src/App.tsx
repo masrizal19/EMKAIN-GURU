@@ -709,9 +709,9 @@ export default function App() {
 
   // D. SHARED LAYOUT FOR AUTHENTICATED PORTALS (Dashboard, Generate Soal, Questions Ready, Profile, Community, Chat, Admin Panel)
   return (
-    <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-0 px-0 md:py-6 md:px-4 lg:px-8 flex items-center justify-center font-body" id="authenticated-workspace">
+    <div className="w-screen min-h-screen bg-[#B4D3FF] neo-grid-bg p-0 m-0 flex flex-col font-body overflow-hidden" id="authenticated-workspace">
       <div 
-        className="flex flex-col lg:flex-row w-full max-w-7xl bg-[#FAF6F0] rounded-none md:rounded-2xl border-0 md:border-2 border-gray-900 shadow-none md:shadow-lg overflow-hidden min-h-screen md:h-[90vh] md:max-h-[90vh]" 
+        className="flex flex-col lg:flex-row w-full h-screen bg-[#FAF6F0] rounded-none border-0 md:border-2 border-gray-900 shadow-none overflow-hidden" 
         id="app-workspace-layout"
         style={headerSettings ? {
           '--tw-border-opacity': 1,
@@ -796,7 +796,7 @@ export default function App() {
 
         {/* SHARED STABLE SIDEBAR */}
         <aside 
-          className="hidden lg:flex w-full lg:w-[280px] flex-col justify-between p-6 flex-shrink-0 overflow-y-auto" 
+          className="hidden lg:flex w-full lg:w-[280px] flex-col justify-between p-6 flex-shrink-0 overflow-y-auto h-full" 
           id="app-workspace-sidebar"
           style={{ 
             backgroundColor: headerSettings?.bg_color || '#FAF6F0',
@@ -1053,7 +1053,7 @@ export default function App() {
         </aside>
 
         {/* WORKSPACE CONTENT PANELS */}
-        <main className="flex-1 neo-grid-bg p-4 md:p-6 lg:p-8 pb-24 lg:pb-8 overflow-y-auto" id="app-workspace-content-pane">
+        <main className="flex-1 neo-grid-bg p-4 md:p-6 lg:p-8 pb-24 lg:pb-8 overflow-y-auto h-full" id="app-workspace-content-pane">
           <div className="max-w-6xl mx-auto" id="workspace-sub-viewport">
             
             {screen === AppScreen.DASHBOARD && (
