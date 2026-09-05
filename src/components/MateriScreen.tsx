@@ -207,6 +207,44 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
 
   const fetchMateriData = React.useCallback(async () => {
     try {
+      // 1. Fetch profiles to map user IDs to account owner display names
+      const { data: profilesData, error: profilesErr } = await supabase
+        .from('profiles')
+        .select('id, nama_lengkap, username');
+
+      if (profilesErr) {
+        console.error('Error fetching profiles for materi author:', profilesErr);
+      }
+
+      const profilesMap = new Map<string, string>();
+      if (profilesData && Array.isArray(profilesData)) {
+        profilesData.forEach((p: any) => {
+          const name = (p.nama_lengkap || p.username || '').trim();
+          if (name) {
+            profilesMap.set(p.id, name);
+          }
+        });
+      }
+
+      // Ensure current user's profile is available in the map
+      if (profile?.id) {
+        const myName = (profile.nama_lengkap || profile.username || '').trim();
+        if (myName) {
+          profilesMap.set(profile.id, myName);
+        }
+      }
+
+      const getAuthorName = (userId?: string, fallback: string = 'Guru'): string => {
+        if (!userId) return fallback;
+        if (profilesMap.has(userId)) {
+          return profilesMap.get(userId)!;
+        }
+        if (profile?.id === userId && (profile.nama_lengkap || profile.username)) {
+          return (profile.nama_lengkap || profile.username).trim();
+        }
+        return fallback;
+      };
+
       const { data: filesData, error: filesErr } = await supabase
         .from('materi_files')
         .select('*')
@@ -231,19 +269,21 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
 
       if (filesData && filesData.length > 0) {
         filesData.forEach((item: any) => {
+          const ownerId = item.uploaded_by || item.user_id;
+          const authorName = getAuthorName(ownerId, 'Guru');
           uploadedItems.push({
             id: item.id,
             title: item.title,
             subject: item.subject,
             grade: item.class_level,
             type: 'Modul PDF' as any,
-            author: 'Guru',
+            author: authorName,
             downloads: 0,
             date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
             description: `File: ${item.file_name} (${Math.round((item.file_size || 0) / 1024)} KB)`,
             tags: ['File Upload'],
             content: item.file_path,
-            uploaded_by: item.uploaded_by,
+            uploaded_by: ownerId,
             file_path: item.file_path,
             category: item.category || 'materi',
             sumber_materi: 'file'
@@ -255,19 +295,21 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
         textData.forEach((item: any) => {
           const isLink = item.sumber_materi === 'link';
           const linkTarget = item.materi_url || item.isi_materi;
+          const ownerId = item.user_id || item.uploaded_by;
+          const authorName = getAuthorName(ownerId, 'Guru');
           uploadedItems.push({
             id: item.id,
             title: item.judul_materi,
             subject: item.mata_pelajaran,
             grade: item.kelas,
             type: (item.tipe_materi || (isLink ? 'Slide Tayang' : 'Rangkuman AI')) as any,
-            author: isLink ? 'Guru' : 'Guru AI',
+            author: authorName,
             downloads: 0,
             date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
             description: isLink ? `Link Canva: ${linkTarget}` : (item.isi_materi ? (item.isi_materi.substring(0, 100) + '...') : ''),
             tags: Array.isArray(item.tags) ? item.tags : (item.tags ? [item.tags] : (isLink ? ['Canva', 'Link'] : ['AI'])),
             content: item.isi_materi,
-            uploaded_by: item.user_id,
+            uploaded_by: ownerId,
             sumber_materi: item.sumber_materi || 'ai',
             materi_url: item.materi_url || (isLink ? item.isi_materi : undefined),
             link_type: item.link_type,
@@ -287,7 +329,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
     } catch (err) {
       console.error('Exception in fetchMateriData:', err);
     }
-  }, []);
+  }, [profile?.id, profile?.nama_lengkap, profile?.username]);
 
   React.useEffect(() => {
     fetchMateriData();
@@ -373,9 +415,50 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
     return matchSearch && matchSubject && matchGrade;
   });
 
-  const handleCreate = (e?: React.FormEvent) => {
+  const handleCreate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!formData.title) return;
+
+    const authorName = (profile.nama_lengkap || profile.username || 'Guru').trim();
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const currentUserId = user?.id || profile.id;
+
+      const tagsArray = formData.tags
+        ? formData.tags.split(',').map(t => t.trim()).filter(Boolean)
+        : ['Manual'];
+
+      const { error } = await supabase
+        .from('materi')
+        .insert({
+          user_id: currentUserId,
+          judul_materi: formData.title,
+          mata_pelajaran: formData.subject,
+          kelas: formData.grade,
+          isi_materi: formData.content,
+          sumber_materi: 'manual',
+          tipe_materi: formData.type || 'Materi Teks',
+          tags: tagsArray
+        });
+
+      if (!error) {
+        setCreationMode('idle');
+        setFormData({
+          title: '',
+          subject: 'Matematika',
+          grade: 'Kelas 7',
+          type: 'Materi Teks' as any,
+          topic: '',
+          content: '',
+          tags: ''
+        });
+        await fetchMateriData();
+        return;
+      }
+    } catch (err) {
+      console.error('Error saving manual materi:', err);
+    }
 
     const newItem: MateriItem = {
       id: `mat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -383,12 +466,14 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
       subject: formData.subject,
       grade: formData.grade,
       type: formData.type,
-      author: profile.nama_lengkap,
+      author: authorName,
       downloads: 0,
       date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
       description: formData.content.substring(0, 100) + '...',
       tags: formData.tags ? formData.tags.split(',').map(t => t.trim()) : ['Umum'],
-      content: formData.content
+      content: formData.content,
+      uploaded_by: profile.id,
+      sumber_materi: 'manual'
     };
     setMateriList(prev => deduplicateById([newItem, ...prev]));
     setCreationMode('idle');
@@ -446,13 +531,14 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
       setUploadProgress(100);
       alert('File berhasil diupload');
       
+      const authorName = (profile.nama_lengkap || profile.username || 'Guru').trim();
       const newItem: MateriItem = {
         id: dbData && dbData.length > 0 ? dbData[0].id : `upload-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         title: formData.title,
         subject: formData.subject,
         grade: formData.grade,
         type: formData.type,
-        author: profile.nama_lengkap,
+        author: authorName,
         downloads: 0,
         date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
         description: `File: ${uploadFile.name}`,
@@ -460,13 +546,15 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
         content: filePath,
         uploaded_by: userId,
         file_path: filePath,
-        category: 'materi'
+        category: 'materi',
+        sumber_materi: 'file'
       };
       setMateriList(prev => deduplicateById([newItem, ...prev]));
       
       setCreationMode('idle');
       setUploadFile(null);
       setFormData({...formData, title: '', content: ''});
+      await fetchMateriData();
     } catch (err: any) {
       setUploadError(err.message || 'Terjadi kesalahan saat mengunggah');
     } finally {
@@ -1119,9 +1207,9 @@ LATIHAN & EVALUASI MANDIRI:
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-700">
-                    {item.author.charAt(0)}
+                    G
                   </div>
-                  <span className="text-[10px] font-bold text-gray-700 truncate max-w-[100px]">
+                  <span className="text-[10px] font-bold text-gray-700 truncate max-w-[100px]" title={item.author}>
                     {item.author}
                   </span>
                 </div>
