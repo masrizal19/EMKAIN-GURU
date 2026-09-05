@@ -66,7 +66,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
   const [materiList, setMateriList] = useState<MateriItem[]>(INITIAL_MATERI_LIST);
   
   const [creationMode, setCreationMode] = useState<'idle' | 'compose' | 'select' | 'manual' | 'ai'>('idle');
-  const [composeTab, setComposeTab] = useState<'manual' | 'upload' | 'ai'>('manual');
+  const [composeTab, setComposeTab] = useState<'manual' | 'upload' | 'link' | 'ai'>('manual');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState('');
@@ -74,6 +74,102 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
   const [uploadedFilesList, setUploadedFilesList] = useState<any[]>([]);
   const [itemToDelete, setItemToDelete] = useState<MateriItem | null>(null);
   const [isAiDraft, setIsAiDraft] = useState(false);
+
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkVerified, setLinkVerified] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState('');
+  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'success' | 'private' | 'error'>('idle');
+
+  const handleVerifyCanva = async () => {
+    if (!linkUrl) {
+      alert('Mohon masukkan Link Canva terlebih dahulu.');
+      return;
+    }
+    setIsVerifying(true);
+    setVerifyMessage('Memverifikasi link...');
+    setVerifyStatus('idle');
+    setLinkVerified(false);
+
+    try {
+      const res = await fetch('/api/verify-canva', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: linkUrl })
+      });
+      const data = await res.json();
+
+      if (data.success && data.verified) {
+        setLinkVerified(true);
+        setVerifyStatus('success');
+        setVerifyMessage('✓ LINK CANVA PUBLIK\nMateri dapat diakses oleh pengguna lain.');
+      } else {
+        setLinkVerified(false);
+        setVerifyStatus('private');
+        setVerifyMessage(data.error || 'LINK MATERI CANVA ANDA TIDAK PUBLIK');
+      }
+    } catch (err) {
+      setLinkVerified(false);
+      setVerifyStatus('error');
+      setVerifyMessage('STATUS LINK TIDAK DAPAT DIVERIFIKASI\nPastikan link Canva dapat dibuka tanpa login dan dapat dilihat oleh siapa saja yang memiliki link.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleSaveLinkMateri = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.title || !formData.subject || !formData.grade || !linkUrl) {
+      alert('Mohon lengkapi semua field yang wajib.');
+      return;
+    }
+    if (!linkVerified) {
+      alert('Mohon verifikasi link Canva terlebih dahulu dan pastikan berstatus publik.');
+      return;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const currentUserId = user?.id || profile.id;
+
+      const { error } = await supabase
+        .from('materi')
+        .insert({
+          user_id: currentUserId,
+          judul_materi: formData.title,
+          mata_pelajaran: formData.subject,
+          kelas: formData.grade,
+          isi_materi: linkUrl,
+          sumber_materi: 'link',
+          tipe_materi: 'Slide Tayang',
+          tags: ['Canva', 'Link']
+        });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      alert('Materi Link Canva berhasil disimpan!');
+      setCreationMode('idle');
+      setLinkUrl('');
+      setLinkVerified(false);
+      setVerifyStatus('idle');
+      setVerifyMessage('');
+      setFormData({
+        title: '',
+        subject: 'Matematika',
+        grade: 'Kelas 7',
+        type: 'Materi Teks' as any,
+        topic: '',
+        content: '',
+        tags: ''
+      });
+
+      await fetchMateriData();
+    } catch (err: any) {
+      alert(err.message || 'Gagal menyimpan materi link.');
+    }
+  };
 
   const fetchMateriData = React.useCallback(async () => {
     try {
@@ -123,17 +219,18 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
 
       if (textData && textData.length > 0) {
         textData.forEach((item: any) => {
+          const isLink = item.sumber_materi === 'link';
           uploadedItems.push({
             id: item.id,
             title: item.judul_materi,
             subject: item.mata_pelajaran,
             grade: item.kelas,
-            type: (item.tipe_materi || 'Rangkuman AI') as any,
-            author: 'Guru AI',
+            type: (item.tipe_materi || (isLink ? 'Slide Tayang' : 'Rangkuman AI')) as any,
+            author: isLink ? 'Guru' : 'Guru AI',
             downloads: 0,
             date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
-            description: item.isi_materi ? (item.isi_materi.substring(0, 100) + '...') : '',
-            tags: Array.isArray(item.tags) ? item.tags : (item.tags ? [item.tags] : ['AI']),
+            description: isLink ? `Link Canva: ${item.isi_materi}` : (item.isi_materi ? (item.isi_materi.substring(0, 100) + '...') : ''),
+            tags: Array.isArray(item.tags) ? item.tags : (item.tags ? [item.tags] : (isLink ? ['Canva', 'Link'] : ['AI'])),
             content: item.isi_materi,
             uploaded_by: item.user_id,
             sumber_materi: item.sumber_materi || 'ai'
@@ -628,28 +725,120 @@ LATIHAN & EVALUASI MANDIRI:
               <button onClick={handleCloseModal} className="p-1 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             
-            <div className="flex gap-2 mb-4 shrink-0 p-1 bg-[#FAF6F0] rounded-xl border-2 border-gray-900">
+            <div className="flex gap-2 mb-4 shrink-0 p-1 bg-[#FAF6F0] rounded-xl border-2 border-gray-950 overflow-x-auto">
               <button 
                 onClick={() => setComposeTab('manual')} 
-                className={`flex-1 py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'manual' ? 'bg-[#FF8B7B] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
+                className={`flex-1 min-w-[90px] py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'manual' ? 'bg-[#FF8B7B] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 ✍ Buat Manual
               </button>
               <button 
                 onClick={() => setComposeTab('upload')} 
-                className={`flex-1 py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'upload' ? 'bg-[#FF8B7B] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
+                className={`flex-1 min-w-[90px] py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'upload' ? 'bg-[#FF8B7B] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 📎 Upload File
               </button>
               <button 
+                onClick={() => setComposeTab('link')} 
+                className={`flex-1 min-w-[90px] py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'link' ? 'bg-[#A2D2FF] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
+              >
+                🔗 Link
+              </button>
+              <button 
                 onClick={() => setComposeTab('ai')} 
-                className={`flex-1 py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'ai' ? 'bg-[#FFD166] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
+                className={`flex-1 min-w-[90px] py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'ai' ? 'bg-[#FFD166] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 ✨ Bantuan AI
               </button>
             </div>
             
             <div className="overflow-y-auto flex-1 pr-2">
+              {composeTab === 'link' && (
+                <form onSubmit={handleSaveLinkMateri} className="space-y-4 text-xs pb-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold mb-1">Judul Materi <span className="text-red-500">*</span></label>
+                      <input required className="w-full p-2 border-2 border-gray-900 rounded-lg" placeholder="Cth: Presentasi Materi Bab 1" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1">Tipe Materi</label>
+                      <input disabled className="w-full p-2 border-2 border-gray-900 rounded-lg bg-gray-100 font-bold" value="Slide Tayang / Canva" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold mb-1">Mata Pelajaran <span className="text-red-500">*</span></label>
+                      <input required className="w-full p-2 border-2 border-gray-900 rounded-lg" value={formData.subject} onChange={e => setFormData({...formData, subject: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1">Kelas <span className="text-red-500">*</span></label>
+                      <input required className="w-full p-2 border-2 border-gray-900 rounded-lg" value={formData.grade} onChange={e => setFormData({...formData, grade: e.target.value})} />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block font-bold mb-1">Link Materi Canva <span className="text-red-500">*</span></label>
+                    <div className="flex gap-2">
+                      <input 
+                        required 
+                        type="url"
+                        className="flex-1 p-2 border-2 border-gray-900 rounded-lg" 
+                        placeholder="https://www.canva.com/design/..." 
+                        value={linkUrl} 
+                        onChange={e => {
+                          setLinkUrl(e.target.value);
+                          setLinkVerified(false);
+                          setVerifyStatus('idle');
+                          setVerifyMessage('');
+                        }} 
+                      />
+                      <button
+                        type="button"
+                        onClick={handleVerifyCanva}
+                        disabled={isVerifying || !linkUrl}
+                        className="px-4 py-2 bg-gray-900 text-white rounded-lg font-black uppercase text-[10px] neo-border hover:bg-gray-800 disabled:opacity-50 cursor-pointer shrink-0"
+                      >
+                        {isVerifying ? 'Memverifikasi...' : 'Verifikasi Link'}
+                      </button>
+                    </div>
+                    <p className="text-[11px] font-medium text-gray-500 mt-1">
+                      Pastikan materi Canva dapat diakses oleh semua orang yang memiliki link.
+                    </p>
+                  </div>
+
+                  {verifyMessage && (
+                    <div className={`p-3 rounded-xl border-2 font-bold text-xs ${
+                      verifyStatus === 'success' ? 'bg-green-50 text-green-800 border-green-300' :
+                      verifyStatus === 'private' ? 'bg-amber-50 text-amber-900 border-amber-300' :
+                      'bg-red-50 text-red-800 border-red-300'
+                    }`}>
+                      <p className="whitespace-pre-line">{verifyMessage}</p>
+                      {verifyStatus === 'private' && (
+                        <p className="text-[11px] font-semibold mt-1 text-amber-700">
+                          Materi Canva ini masih private atau memerlukan izin akses. Ubah pengaturan akses Canva menjadi 'Siapa saja yang memiliki link dapat melihat', kemudian verifikasi kembali.
+                        </p>
+                      )}
+                      {verifyStatus === 'error' && (
+                        <p className="text-[11px] font-semibold mt-1 text-red-700">
+                          Pastikan link Canva dapat dibuka tanpa login dan dapat dilihat oleh siapa saja yang memiliki link.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-4 sticky bottom-0 bg-white p-2 border-t-2 border-gray-100">
+                    <button 
+                      type="submit" 
+                      disabled={!linkVerified}
+                      className="flex-1 p-3 bg-[#FFD166] text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-[#ffdf8f] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-[3px_3px_0_rgba(0,0,0,1)]"
+                    >
+                      Simpan Materi
+                    </button>
+                    <button type="button" onClick={handleCloseModal} className="flex-1 p-3 bg-gray-200 text-gray-900 rounded-xl font-bold uppercase neo-border hover:bg-gray-300 cursor-pointer">Batal</button>
+                  </div>
+                </form>
+              )}
+
               {composeTab === 'manual' && (
                 <form onSubmit={(e) => { e.preventDefault(); isAiDraft ? handleSaveMateriAI() : handleCreate(); }} className="space-y-4 text-xs pb-4">
                   <div className="grid grid-cols-2 gap-3">
@@ -846,12 +1035,13 @@ LATIHAN & EVALUASI MANDIRI:
               {/* Type and Grade Badges */}
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className={`px-2.5 py-1 rounded-lg neo-border-thin text-[10px] font-black uppercase tracking-wider ${
+                  item.sumber_materi === 'link' ? 'bg-[#A2D2FF] text-gray-900' :
                   item.type === 'Modul PDF' ? 'bg-[#C1F2D0] text-gray-900' :
                   item.type === 'Slide Tayang' ? 'bg-[#A2D2FF] text-gray-900' :
                   item.type === 'Rangkuman AI' ? 'bg-[#FFD166] text-gray-900' : 
                   item.type === 'Materi Teks' ? 'bg-[#FEE4CB] text-gray-900' : 'bg-[#FF8B7B] text-gray-900'
                 }`}>
-                  {item.type}
+                  {item.sumber_materi === 'link' ? '🔗 Link Canva' : item.type}
                 </span>
                 <span className="px-2 py-0.5 bg-gray-100 rounded-md text-[10px] font-bold text-gray-600">
                   {item.grade}
@@ -958,7 +1148,20 @@ LATIHAN & EVALUASI MANDIRI:
 
               <div>
                 <strong className="text-gray-900 text-sm uppercase bg-yellow-100 px-2 py-1 rounded inline-block mb-2">Isi Materi</strong>
-                {viewingMateri.tags && viewingMateri.tags.includes('File Upload') ? (
+                {viewingMateri.sumber_materi === 'link' ? (
+                  <div className="mt-2 space-y-3">
+                    <div className="p-4 bg-blue-50 rounded-xl border-2 border-blue-200">
+                      <p className="font-bold text-sm text-blue-900 mb-1">Link Materi Canva Publik</p>
+                      <p className="text-xs text-blue-700 break-all mb-3">{viewingMateri.content}</p>
+                      <button 
+                        onClick={() => window.open(viewingMateri.content, '_blank')}
+                        className="px-4 py-2.5 bg-[#A2D2FF] hover:bg-[#8ec2ff] text-gray-900 font-black text-xs uppercase rounded-xl neo-border shadow-sm flex items-center gap-2 cursor-pointer"
+                      >
+                        <BookOpen className="w-4 h-4" /> Buka Materi Canva
+                      </button>
+                    </div>
+                  </div>
+                ) : viewingMateri.tags && viewingMateri.tags.includes('File Upload') ? (
                   <div className="mt-2">
                     <p className="mb-3 text-gray-700">Materi ini adalah file yang diunggah.</p>
                     <button 
@@ -984,7 +1187,7 @@ LATIHAN & EVALUASI MANDIRI:
                 )}
               </div>
             </div>
-            {!viewingMateri.tags?.includes('File Upload') && (
+            {!viewingMateri.tags?.includes('File Upload') && viewingMateri.sumber_materi !== 'link' && (
               <div className="flex gap-3 pt-4 border-t-2 border-gray-100">
                 <button onClick={() => exportPDF(viewingMateri)} className="flex-1 p-3 bg-red-500 text-white rounded-xl font-bold uppercase neo-border flex justify-center items-center gap-2 cursor-pointer hover:bg-red-600"><Download className="w-4 h-4"/> Export PDF</button>
                 <button onClick={() => exportWord(viewingMateri)} className="flex-1 p-3 bg-blue-600 text-white rounded-xl font-bold uppercase neo-border flex justify-center items-center gap-2 cursor-pointer hover:bg-blue-700"><Download className="w-4 h-4"/> Export Word</button>

@@ -1917,6 +1917,51 @@ app.get('/api/admin/debug/delete-user', async (req, res): Promise<any> => {
   });
 });
 
+// Verify Canva Link Public Access
+app.post('/api/verify-canva', async (req, res): Promise<any> => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ success: false, error: 'URL tidak valid.' });
+    }
+
+    const trimmed = url.trim();
+    const canvaDesignRegex = /^https?:\/\/(www\.)?canva\.com\/design\/[a-zA-Z0-9_-]+\/.+/i;
+    if (!canvaDesignRegex.test(trimmed)) {
+      return res.status(200).json({ success: false, error: 'URL bukan link Canva Design yang valid. Contoh: https://www.canva.com/design/...' });
+    }
+
+    try {
+      const response = await fetch(trimmed, {
+        method: 'GET',
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403 || response.status === 404) {
+          return res.status(200).json({ success: false, error: 'LINK MATERI CANVA ANDA TIDAK PUBLIK' });
+        }
+        return res.status(200).json({ success: false, error: 'STATUS LINK TIDAK DAPAT DIVERIFIKASI' });
+      }
+
+      const html = await response.text();
+      const lowerHtml = html.toLowerCase();
+      if (lowerHtml.includes('/login') || lowerHtml.includes('/signin') || lowerHtml.includes('log in to canva') || lowerHtml.includes('password protected')) {
+        return res.status(200).json({ success: false, error: 'LINK MATERI CANVA ANDA TIDAK PUBLIK' });
+      }
+
+      return res.json({ success: true, verified: true });
+    } catch (fetchErr) {
+      return res.status(200).json({ success: false, error: 'STATUS LINK TIDAK DAPAT DIVERIFIKASI' });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Server error' });
+  }
+});
+
 // -------------------------------------------------------------
 // VITE AND STATIC FILE SERVING
 // -------------------------------------------------------------
