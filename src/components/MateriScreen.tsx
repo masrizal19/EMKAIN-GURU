@@ -1204,16 +1204,16 @@ LATIHAN & EVALUASI MANDIRI:
             </div>
 
             <div className="mt-5 pt-4 border-t-2 border-gray-100 flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-700">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-700 shrink-0">
                     G
                   </div>
-                  <span className="text-[10px] font-bold text-gray-700 truncate max-w-[100px]" title={item.author}>
+                  <span className="text-[10px] font-bold text-gray-700 break-words [overflow-wrap:anywhere] whitespace-normal leading-tight">
                     {item.author}
                   </span>
                 </div>
-                <span className="text-[9px] font-bold text-gray-400">{item.date}</span>
+                <span className="text-[9px] font-bold text-gray-400 shrink-0">{item.date}</span>
               </div>
               <div className="flex gap-2">
                 <button 
