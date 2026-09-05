@@ -742,7 +742,7 @@ LATIHAN & EVALUASI MANDIRI:
                 onClick={() => setComposeTab('link')} 
                 className={`flex-1 min-w-[90px] py-2 text-[10px] sm:text-xs font-black uppercase rounded-lg transition-all ${composeTab === 'link' ? 'bg-[#A2D2FF] text-gray-900 neo-border shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'text-gray-500 hover:text-gray-900'}`}
               >
-                🔗 Link
+                🔗 Link Canva
               </button>
               <button 
                 onClick={() => setComposeTab('ai')} 
