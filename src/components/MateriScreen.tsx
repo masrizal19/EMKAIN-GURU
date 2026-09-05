@@ -26,6 +26,12 @@ interface MateriItem {
   file_path?: string;
   category?: string;
   sumber_materi?: string;
+  materi_url?: string;
+  link_type?: string;
+  link_verified?: boolean;
+  link_access_status?: string;
+  link_verified_at?: string;
+  link_verification_message?: string;
 }
 
 function deduplicateById<T extends { id?: any }>(items: T[]): T[] {
@@ -79,52 +85,74 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
   const [linkVerified, setLinkVerified] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState('');
-  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'success' | 'private' | 'error'>('idle');
+  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-  const handleVerifyCanva = async () => {
-    if (!linkUrl) {
+  const validateCanvaUrl = (rawUrl: string): { valid: boolean; error?: string } => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
+      return { valid: false, error: 'URL Canva tidak boleh kosong.' };
+    }
+
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'https:') {
+        return { valid: false, error: 'LINK CANVA TIDAK VALID. URL harus menggunakan protokol https://' };
+      }
+
+      const host = parsed.hostname.toLowerCase();
+      const isCanvaDomain = 
+        host === 'canva.com' || 
+        host.endsWith('.canva.com') || 
+        host === 'canva.link' || 
+        host.endsWith('.canva.link') ||
+        host === 'canva.me' ||
+        host.endsWith('.canva.me');
+
+      if (!isCanvaDomain) {
+        return { valid: false, error: 'LINK CANVA TIDAK VALID. Domain harus berupa canva.com atau canva.link.' };
+      }
+
+      if (!parsed.pathname || parsed.pathname === '/') {
+        return { valid: false, error: 'LINK CANVA TIDAK VALID. Pastikan menyertakan link materi/desain Canva.' };
+      }
+
+      return { valid: true };
+    } catch {
+      return { valid: false, error: 'LINK CANVA TIDAK VALID. Format URL tidak valid.' };
+    }
+  };
+
+  const handleVerifyCanva = () => {
+    const trimmed = linkUrl.trim();
+    if (!trimmed) {
       alert('Mohon masukkan Link Canva terlebih dahulu.');
       return;
     }
+
     setIsVerifying(true);
-    setVerifyMessage('Memverifikasi link...');
-    setVerifyStatus('idle');
-    setLinkVerified(false);
+    const validation = validateCanvaUrl(trimmed);
 
-    try {
-      const res = await fetch('/api/verify-canva', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: linkUrl })
-      });
-      const data = await res.json();
-
-      if (data.success && data.verified) {
-        setLinkVerified(true);
-        setVerifyStatus('success');
-        setVerifyMessage('✓ LINK CANVA PUBLIK\nMateri dapat diakses oleh pengguna lain.');
-      } else {
-        setLinkVerified(false);
-        setVerifyStatus('private');
-        setVerifyMessage(data.error || 'LINK MATERI CANVA ANDA TIDAK PUBLIK');
-      }
-    } catch (err) {
+    if (validation.valid) {
+      setLinkVerified(true);
+      setVerifyStatus('success');
+      setVerifyMessage('✓ LINK CANVA VALID');
+    } else {
       setLinkVerified(false);
       setVerifyStatus('error');
-      setVerifyMessage('STATUS LINK TIDAK DAPAT DIVERIFIKASI\nPastikan link Canva dapat dibuka tanpa login dan dapat dilihat oleh siapa saja yang memiliki link.');
-    } finally {
-      setIsVerifying(false);
+      setVerifyMessage(validation.error || 'LINK CANVA TIDAK VALID');
     }
+    setIsVerifying(false);
   };
 
   const handleSaveLinkMateri = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title || !formData.subject || !formData.grade || !linkUrl) {
+    const finalUrl = linkUrl.trim();
+    if (!formData.title || !formData.subject || !formData.grade || !finalUrl) {
       alert('Mohon lengkapi semua field yang wajib.');
       return;
     }
     if (!linkVerified) {
-      alert('Mohon verifikasi link Canva terlebih dahulu dan pastikan berstatus publik.');
+      alert('Mohon verifikasi link Canva terlebih dahulu.');
       return;
     }
 
@@ -139,9 +167,15 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
           judul_materi: formData.title,
           mata_pelajaran: formData.subject,
           kelas: formData.grade,
-          isi_materi: linkUrl,
+          isi_materi: finalUrl,
+          materi_url: finalUrl,
           sumber_materi: 'link',
           tipe_materi: 'Slide Tayang',
+          link_type: 'canva',
+          link_verified: true,
+          link_access_status: 'ready',
+          link_verified_at: new Date().toISOString(),
+          link_verification_message: 'Link Canva valid secara format',
           tags: ['Canva', 'Link']
         });
 
@@ -220,6 +254,7 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
       if (textData && textData.length > 0) {
         textData.forEach((item: any) => {
           const isLink = item.sumber_materi === 'link';
+          const linkTarget = item.materi_url || item.isi_materi;
           uploadedItems.push({
             id: item.id,
             title: item.judul_materi,
@@ -229,11 +264,17 @@ export default function MateriScreen({ profile }: MateriScreenProps) {
             author: isLink ? 'Guru' : 'Guru AI',
             downloads: 0,
             date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
-            description: isLink ? `Link Canva: ${item.isi_materi}` : (item.isi_materi ? (item.isi_materi.substring(0, 100) + '...') : ''),
+            description: isLink ? `Link Canva: ${linkTarget}` : (item.isi_materi ? (item.isi_materi.substring(0, 100) + '...') : ''),
             tags: Array.isArray(item.tags) ? item.tags : (item.tags ? [item.tags] : (isLink ? ['Canva', 'Link'] : ['AI'])),
             content: item.isi_materi,
             uploaded_by: item.user_id,
-            sumber_materi: item.sumber_materi || 'ai'
+            sumber_materi: item.sumber_materi || 'ai',
+            materi_url: item.materi_url || (isLink ? item.isi_materi : undefined),
+            link_type: item.link_type,
+            link_verified: item.link_verified,
+            link_access_status: item.link_access_status,
+            link_verified_at: item.link_verified_at,
+            link_verification_message: item.link_verification_message
           });
         });
       }
@@ -809,18 +850,20 @@ LATIHAN & EVALUASI MANDIRI:
                   {verifyMessage && (
                     <div className={`p-3 rounded-xl border-2 font-bold text-xs ${
                       verifyStatus === 'success' ? 'bg-green-50 text-green-800 border-green-300' :
-                      verifyStatus === 'private' ? 'bg-amber-50 text-amber-900 border-amber-300' :
                       'bg-red-50 text-red-800 border-red-300'
                     }`}>
-                      <p className="whitespace-pre-line">{verifyMessage}</p>
-                      {verifyStatus === 'private' && (
-                        <p className="text-[11px] font-semibold mt-1 text-amber-700">
-                          Materi Canva ini masih private atau memerlukan izin akses. Ubah pengaturan akses Canva menjadi 'Siapa saja yang memiliki link dapat melihat', kemudian verifikasi kembali.
-                        </p>
+                      <p className="whitespace-pre-line text-sm font-black">{verifyMessage}</p>
+                      {verifyStatus === 'success' && (
+                        <div className="text-[11px] font-medium mt-1 text-green-800 space-y-1">
+                          <p>Link akan dibuka langsung di Canva saat materi dipilih.</p>
+                          <p className="text-[10px] text-gray-600 mt-1">
+                            💡 Catatan: Pastikan pengaturan berbagi Canva memungkinkan orang yang memiliki link untuk melihat materi.
+                          </p>
+                        </div>
                       )}
                       {verifyStatus === 'error' && (
                         <p className="text-[11px] font-semibold mt-1 text-red-700">
-                          Pastikan link Canva dapat dibuka tanpa login dan dapat dilihat oleh siapa saja yang memiliki link.
+                          Pastikan link menggunakan format Canva yang valid (contoh: https://www.canva.com/design/... atau https://canva.link/...).
                         </p>
                       )}
                     </div>
@@ -1085,8 +1128,20 @@ LATIHAN & EVALUASI MANDIRI:
                 <span className="text-[9px] font-bold text-gray-400">{item.date}</span>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setViewingMateri(item)} className="flex-1 py-2 bg-gray-900 text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer hover:bg-gray-800 transition-colors">
-                  Buka / Download Materi
+                <button 
+                  onClick={() => {
+                    if (item.sumber_materi === 'link') {
+                      const targetUrl = item.materi_url || item.content;
+                      if (targetUrl) {
+                        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                        return;
+                      }
+                    }
+                    setViewingMateri(item);
+                  }} 
+                  className="flex-1 py-2 bg-gray-900 text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer hover:bg-gray-800 transition-colors"
+                >
+                  {item.sumber_materi === 'link' ? 'Buka Materi Canva' : 'Buka / Download Materi'}
                 </button>
                 {(profile.role?.toLowerCase() === 'admin' || item.uploaded_by === profile.id) && (
                   <button 
@@ -1151,10 +1206,15 @@ LATIHAN & EVALUASI MANDIRI:
                 {viewingMateri.sumber_materi === 'link' ? (
                   <div className="mt-2 space-y-3">
                     <div className="p-4 bg-blue-50 rounded-xl border-2 border-blue-200">
-                      <p className="font-bold text-sm text-blue-900 mb-1">Link Materi Canva Publik</p>
-                      <p className="text-xs text-blue-700 break-all mb-3">{viewingMateri.content}</p>
+                      <p className="font-bold text-sm text-blue-900 mb-1">Link Materi Canva</p>
+                      <p className="text-xs text-blue-700 break-all mb-3">{viewingMateri.materi_url || viewingMateri.content}</p>
                       <button 
-                        onClick={() => window.open(viewingMateri.content, '_blank')}
+                        onClick={() => {
+                          const targetUrl = viewingMateri.materi_url || viewingMateri.content;
+                          if (targetUrl) {
+                            window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                          }
+                        }}
                         className="px-4 py-2.5 bg-[#A2D2FF] hover:bg-[#8ec2ff] text-gray-900 font-black text-xs uppercase rounded-xl neo-border shadow-sm flex items-center gap-2 cursor-pointer"
                       >
                         <BookOpen className="w-4 h-4" /> Buka Materi Canva
