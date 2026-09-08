@@ -1,0 +1,114 @@
+{
+  "rooms": [
+    {
+      "id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "creator_id": null,
+      "creator_name": "Guru EMKAIN",
+      "title": "Kuis Uji Coba",
+      "subject": "Informatika",
+      "class_level": "XII TKJ",
+      "pin": "433080",
+      "room_code": "GAME-HW7X",
+      "status": "playing",
+      "current_question_index": 0,
+      "question_start_time": "2026-09-08T04:40:58.378Z",
+      "question_count": 5,
+      "time_per_question": 20,
+      "created_at": "2026-09-08T04:40:35.713Z",
+      "updated_at": "2026-09-08T04:40:58.378Z"
+    }
+  ],
+  "questions": [
+    {
+      "id": "267be2b4-1122-43d3-bcf6-18a1e7fd1204",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "question_order": 1,
+      "question": "Berapa 1+1?",
+      "option_a": "1",
+      "option_b": "2",
+      "option_c": "3",
+      "option_d": "4",
+      "correct_answer": "B"
+    },
+    {
+      "id": "eaa41ed9-7fab-4ca7-b7fa-2018d4533f87",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "question_order": 2,
+      "question": "Berapa 2+2?",
+      "option_a": "4",
+      "option_b": "5",
+      "option_c": "6",
+      "option_d": "7",
+      "correct_answer": "A"
+    },
+    {
+      "id": "64f08d87-6269-4e10-bb3f-9c098a06f2ea",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "question_order": 3,
+      "question": "Berapa 3+3?",
+      "option_a": "5",
+      "option_b": "6",
+      "option_c": "7",
+      "option_d": "8",
+      "correct_answer": "B"
+    },
+    {
+      "id": "242e4314-9da8-4dc2-b72a-a12e9305fc4a",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "question_order": 4,
+      "question": "Berapa 4+4?",
+      "option_a": "7",
+      "option_b": "8",
+      "option_c": "9",
+      "option_d": "10",
+      "correct_answer": "B"
+    },
+    {
+      "id": "35324a19-a659-4c61-8b35-cab47194a415",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "question_order": 5,
+      "question": "Berapa 5+5?",
+      "option_a": "9",
+      "option_b": "10",
+      "option_c": "11",
+      "option_d": "12",
+      "correct_answer": "B"
+    }
+  ],
+  "participants": [
+    {
+      "id": "1d697060-5a4d-4d11-9c64-f2c3aa0d272a",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "participant_number": "01",
+      "participant_name": "Rizal Santoso",
+      "user_id": null,
+      "joined_at": "2026-09-08T04:40:39.152Z",
+      "total_score": 938,
+      "last_answered_index": 0
+    },
+    {
+      "id": "46649788-e2f5-44a3-86c2-1f3182076bc5",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "participant_number": "02",
+      "participant_name": "Siti Aminah",
+      "user_id": null,
+      "joined_at": "2026-09-08T04:40:53.606Z",
+      "total_score": 0,
+      "last_answered_index": -1
+    }
+  ],
+  "answers": [
+    {
+      "id": "859d24dc-603f-4e11-8b19-65308d9a07bd",
+      "game_id": "be47e2b1-e657-4c9f-9cb9-564699571436",
+      "question_id": "267be2b4-1122-43d3-bcf6-18a1e7fd1204",
+      "participant_id": "1d697060-5a4d-4d11-9c64-f2c3aa0d272a",
+      "question_index": 0,
+      "answer": "B",
+      "is_correct": true,
+      "response_time_ms": 2500,
+      "score": 938,
+      "answered_at": "2026-09-08T04:41:01.429Z"
+    }
+  ]
+}

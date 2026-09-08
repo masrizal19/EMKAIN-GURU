@@ -16,6 +16,7 @@ export enum AppScreen {
   COMMUNITY = 'COMMUNITY',
   LOUNGE = 'LOUNGE',
   CHAT = 'CHAT',
+  GAME = 'GAME',
   PROFILE = 'PROFILE',
   ADMIN_DASHBOARD = 'ADMIN_DASHBOARD',
   ADMIN_GURU_LIST = 'ADMIN_GURU_LIST',
@@ -205,3 +206,64 @@ export interface Conversation {
   } | null;
   unread_count: number;
 }
+
+export type GameStatus = 'waiting' | 'playing' | 'finished' | 'closed';
+
+export interface GameRoom {
+  id: string;
+  creator_id?: string | null;
+  creator_name?: string;
+  title: string;
+  subject: string;
+  class_level: string;
+  pin: string;
+  room_code: string;
+  status: GameStatus;
+  current_question_index: number;
+  question_start_time?: string | null;
+  question_count: number;
+  time_per_question: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GameQuestion {
+  id: string;
+  game_id: string;
+  question_order: number;
+  question: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_answer?: 'A' | 'B' | 'C' | 'D';
+}
+
+export interface GameParticipant {
+  id: string;
+  game_id: string;
+  participant_number: string;
+  participant_name: string;
+  user_id?: string | null;
+  joined_at?: string;
+  total_score: number;
+  last_answered_index?: number;
+  correct_count?: number;
+  wrong_count?: number;
+  unanswered_count?: number;
+  total_time_ms?: number;
+}
+
+export interface GameAnswer {
+  id: string;
+  game_id: string;
+  question_id: string;
+  participant_id: string;
+  question_index: number;
+  answer: 'A' | 'B' | 'C' | 'D';
+  is_correct: boolean;
+  response_time_ms: number;
+  score: number;
+  answered_at?: string;
+}
+

@@ -23,6 +23,8 @@ import CommunityScreen from './components/CommunityScreen';
 import ChatScreen from './components/ChatScreen';
 import AdminPanel from './components/AdminPanel';
 import AiCookingModal from './components/AiCookingModal';
+import { GameCenter } from './components/game/GameCenter';
+import { StudentGameJoin } from './components/game/StudentGameJoin';
 
 // Icons
 import {
@@ -30,6 +32,7 @@ import {
   LayoutGrid,
   BookOpen,
   FileCheck2,
+  Gamepad2,
   Pencil,
   FolderOpen,
   History,
@@ -65,6 +68,10 @@ export default function App() {
   // Chat & Presence State
   const [activeChatTargetUser, setActiveChatTargetUser] = useState<UserProfile | null>(null);
   const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+
+  // Game Room state
+  const [gameInitialRoomCode, setGameInitialRoomCode] = useState<string>('');
+  const [isStudentGameView, setIsStudentGameView] = useState<boolean>(false);
 
   const fetchHeaderSettings = async () => {
     try {
@@ -221,6 +228,15 @@ export default function App() {
   const handleHashRouting = (currentProfile: UserProfile | null, currentSession: any) => {
     const hash = window.location.hash;
 
+    // Check if accessing game directly (can be student join with code or without login)
+    if (hash.startsWith('#/game/join')) {
+      const code = hash.replace('#/game/join/', '').replace('#/game/join', '').replace(/^\//, '');
+      setGameInitialRoomCode(code);
+      setIsStudentGameView(true);
+      setScreen(AppScreen.GAME);
+      return;
+    }
+
     // A. Unauthenticated Area
     if (!currentSession) {
       if (hash === '#/register') {
@@ -254,6 +270,9 @@ export default function App() {
       setScreen(AppScreen.RPM);
     } else if (hash === '#/ujian') {
       setScreen(AppScreen.UJIAN);
+    } else if (hash === '#/game' || hash.startsWith('#/game')) {
+      setIsStudentGameView(false);
+      setScreen(AppScreen.GAME);
     } else if (hash === '#/forum' || hash === '#/community') {
       setScreen(AppScreen.COMMUNITY);
     } else if (hash === '#/lounge' || hash === '#/chat') {
@@ -655,8 +674,23 @@ export default function App() {
     );
   }
 
-  // C. UNAUTHENTICATED GATES: LOGIN & REGISTER
+  // C. UNAUTHENTICATED GATES: LOGIN & REGISTER & GUEST GAME
   if (!session) {
+    if (screen === AppScreen.GAME) {
+      return (
+        <div className="min-h-screen bg-[#FAF6F0] neo-grid-bg py-8 px-4 flex items-center justify-center font-body" id="guest-game-join-wrapper">
+          <StudentGameJoin
+            initialRoomCode={gameInitialRoomCode}
+            onExit={() => {
+              window.location.hash = '#/login';
+              setScreen(AppScreen.LOGIN);
+            }}
+          />
+          {renderStatusIndicator()}
+        </div>
+      );
+    }
+
     if (screen === AppScreen.REGISTER) {
       return (
         <div className="min-h-screen bg-[#B4D3FF] neo-grid-bg py-8 px-4 flex items-center justify-center font-body" id="register-screen-wrapper">
@@ -911,7 +945,21 @@ export default function App() {
                 <span>Ujian</span>
               </button>
 
-              {/* 5. Forum */}
+              {/* 5. Game */}
+              <button
+                onClick={() => { window.location.hash = '#/game'; }}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-all ${
+                  screen === AppScreen.GAME
+                    ? 'bg-[#FF8B7B] text-[#1E1E1E] neo-border-thin neo-shadow-sm translate-x-0.5'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                id="nav-item-game"
+              >
+                <Gamepad2 className="w-4 h-4" />
+                <span>Game</span>
+              </button>
+
+              {/* 6. Forum */}
               <button
                 onClick={() => { window.location.hash = '#/forum'; }}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-all ${
@@ -1107,6 +1155,15 @@ export default function App() {
               />
             )}
 
+            {screen === AppScreen.GAME && profile && (
+              <GameCenter
+                profile={profile}
+                onBackToDashboard={handleBackToDashboard}
+                initialRoomCode={gameInitialRoomCode}
+                isStudentJoinView={isStudentGameView}
+              />
+            )}
+
             {screen === AppScreen.PROFILE && profile && (
               <ProfileScreen
                 profile={profile}
@@ -1175,7 +1232,7 @@ export default function App() {
           {/* 3. Ujian */}
           <button 
             onClick={() => { window.location.hash = '#/ujian'; }}
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
+            className={`flex flex-col items-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
               screen === AppScreen.UJIAN 
                 ? 'bg-[#FF8B7B] text-[#1E1E1E] border border-gray-900 shadow-[1px_1px_0_rgba(0,0,0,1)]' 
                 : 'text-gray-600'
@@ -1183,6 +1240,19 @@ export default function App() {
           >
             <FileCheck2 className="w-5 h-5" />
             <span className="text-[9px] font-black uppercase tracking-wider">Ujian</span>
+          </button>
+
+          {/* 3.5. Game */}
+          <button 
+            onClick={() => { window.location.hash = '#/game'; }}
+            className={`flex flex-col items-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+              screen === AppScreen.GAME 
+                ? 'bg-[#FF8B7B] text-[#1E1E1E] border border-gray-900 shadow-[1px_1px_0_rgba(0,0,0,1)]' 
+                : 'text-gray-600'
+            }`}
+          >
+            <Gamepad2 className="w-5 h-5" />
+            <span className="text-[9px] font-black uppercase tracking-wider">Game</span>
           </button>
 
           {/* 4. Forum */}

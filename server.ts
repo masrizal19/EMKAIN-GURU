@@ -11,6 +11,7 @@ import multer from 'multer';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { createServer as createViteServer } from 'vite';
+import { setupGameRoutes } from './server_game';
 
 // Load environment variables
 dotenv.config();
@@ -1959,6 +1960,9 @@ app.post('/api/verify-canva', async (req, res): Promise<any> => {
     return res.status(500).json({ success: false, error: err.message || 'Server error' });
   }
 });
+
+// Setup Game Quiz routes
+setupGameRoutes(app);
 
 // -------------------------------------------------------------
 // VITE AND STATIC FILE SERVING
