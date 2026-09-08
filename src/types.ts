@@ -269,3 +269,71 @@ export interface GameAnswer {
   answered_at?: string;
 }
 
+// ==========================================
+// TEBAK WARNA (COLOR GAME) TYPES
+// ==========================================
+export type ColorGameMode = 'easy' | 'medium' | 'hard';
+export type ColorGameStatus = 'waiting' | 'memorize' | 'playing' | 'finished' | 'closed';
+
+export interface ColorGame {
+  id: string;
+  creator_id?: string;
+  title: string;
+  mode: ColorGameMode;
+  room_code: string;
+  pin: string;
+  status: ColorGameStatus;
+  current_round: number;
+  total_rounds: number;
+  created_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface ColorRound {
+  id: string;
+  game_id: string;
+  round_number: number;
+  target_color: string;
+  target_r: number;
+  target_g: number;
+  target_b: number;
+  created_at?: string;
+}
+
+export interface ColorParticipant {
+  id: string;
+  game_id: string;
+  user_id?: string | null;
+  participant_number: number;
+  participant_name: string;
+  session_token?: string | null;
+  total_score: number;
+  rounds_completed: number;
+  joined_at?: string;
+}
+
+export interface ColorGuess {
+  id: string;
+  game_id: string;
+  round_id: string;
+  participant_id: string;
+  guessed_color: string;
+  guessed_r: number;
+  guessed_g: number;
+  guessed_b: number;
+  score: number;
+  distance?: number | null;
+  submitted_at?: string;
+}
+
+export interface ColorGamePublicState {
+  game_id: string;
+  status: ColorGameStatus;
+  mode: ColorGameMode;
+  current_round: number;
+  total_rounds: number;
+  participant_count: number;
+  updated_at?: string;
+}
+

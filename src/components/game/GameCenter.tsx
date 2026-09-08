@@ -7,27 +7,36 @@ import React, { useState, useEffect } from 'react';
 import { 
   Gamepad2, Plus, Users, Play, Trophy, Copy, CheckCircle2, 
   Clock, Share2, Eye, RotateCcw, AlertTriangle, ArrowRight, ExternalLink,
-  Trash2, FileText, X
+  Trash2, FileText, X, Palette
 } from 'lucide-react';
 import { UserProfile, GameRoom } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { CreateGameModal } from './CreateGameModal';
 import { TeacherGameRoom } from './TeacherGameRoom';
 import { StudentGameJoin } from './StudentGameJoin';
+import { ColorGameCenter } from '../colorGame/ColorGameCenter';
+import { ColorStudentGameJoin } from '../colorGame/ColorStudentGameJoin';
 
 interface GameCenterProps {
   profile: UserProfile;
   onBackToDashboard: () => void;
   initialRoomCode?: string;
   isStudentJoinView?: boolean;
+  initialTab?: 'quiz' | 'color';
+  isColorJoin?: boolean;
+  colorRoomCode?: string;
 }
 
 export const GameCenter: React.FC<GameCenterProps> = ({
   profile,
   onBackToDashboard,
   initialRoomCode = '',
-  isStudentJoinView = false
+  isStudentJoinView = false,
+  initialTab = 'quiz',
+  isColorJoin = false,
+  colorRoomCode = ''
 }) => {
+  const [activeTab, setActiveTab] = useState<'quiz' | 'color'>(initialTab);
   const [rooms, setRooms] = useState<GameRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,10 +95,16 @@ export const GameCenter: React.FC<GameCenterProps> = ({
   }, [initialRoomCode, isStudentJoinView]);
 
   useEffect(() => {
-    if (!studentMode && !activeTeacherRoomId) {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (!studentMode && !activeTeacherRoomId && activeTab === 'quiz') {
       loadRooms();
     }
-  }, [studentMode, activeTeacherRoomId]);
+  }, [studentMode, activeTeacherRoomId, activeTab]);
 
   const handleCopyLink = (room: GameRoom) => {
     const url = `${window.location.origin}/#/game/join/${room.room_code}`;
@@ -205,7 +220,19 @@ export const GameCenter: React.FC<GameCenterProps> = ({
     );
   }
 
-  // If student join view
+  // If student join view for Color Game
+  if (isColorJoin) {
+    return (
+      <ColorStudentGameJoin
+        initialRoomCode={colorRoomCode}
+        onExit={() => {
+          window.location.hash = '#/game';
+        }}
+      />
+    );
+  }
+
+  // If student join view for Quiz
   if (studentMode) {
     return (
       <StudentGameJoin
@@ -221,12 +248,72 @@ export const GameCenter: React.FC<GameCenterProps> = ({
     );
   }
 
+  // If active tab is Color Game
+  if (activeTab === 'color') {
+    return (
+      <div className="space-y-6">
+        {/* GAME TYPE SUB-TABS */}
+        <div className="flex items-center gap-2 p-1.5 bg-white rounded-2xl border-2 border-gray-900 max-w-fit shadow-[2px_2px_0_rgba(0,0,0,1)]">
+          <button
+            onClick={() => {
+              setActiveTab('quiz');
+              window.location.hash = '#/game';
+            }}
+            className="py-2 px-4 rounded-xl font-black text-xs uppercase transition-all cursor-pointer text-gray-600 hover:text-gray-900"
+          >
+            🎮 KUIS PILIHAN GANDA
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('color');
+              window.location.hash = '#/game/color';
+            }}
+            className="py-2 px-4 rounded-xl font-black text-xs uppercase transition-all cursor-pointer bg-[#FFD166] text-gray-900 border border-gray-900 shadow-xs"
+          >
+            🎨 TEBAK WARNA
+          </button>
+        </div>
+
+        <ColorGameCenter
+          profile={profile}
+          onBackToDashboard={onBackToDashboard}
+          onSwitchToQuizGame={() => {
+            setActiveTab('quiz');
+            window.location.hash = '#/game';
+          }}
+        />
+      </div>
+    );
+  }
+
   const activeRoomsCount = rooms.filter(r => r.status === 'waiting' || r.status === 'playing').length;
   const finishedRoomsCount = rooms.filter(r => r.status === 'finished').length;
 
   return (
     <div className="space-y-6 font-body pb-12" id="game-center-container">
       
+      {/* GAME TYPE SUB-TABS */}
+      <div className="flex items-center gap-2 p-1.5 bg-white rounded-2xl border-2 border-gray-900 max-w-fit shadow-[2px_2px_0_rgba(0,0,0,1)]">
+        <button
+          onClick={() => {
+            setActiveTab('quiz');
+            window.location.hash = '#/game';
+          }}
+          className="py-2 px-4 rounded-xl font-black text-xs uppercase transition-all cursor-pointer bg-[#FFD166] text-gray-900 border border-gray-900 shadow-xs"
+        >
+          🎮 KUIS PILIHAN GANDA
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('color');
+            window.location.hash = '#/game/color';
+          }}
+          className="py-2 px-4 rounded-xl font-black text-xs uppercase transition-all cursor-pointer text-gray-600 hover:text-gray-900"
+        >
+          🎨 TEBAK WARNA
+        </button>
+      </div>
+
       {/* HEADER BANNER */}
       <div className="p-6 md:p-8 bg-[#FFD166] rounded-2xl border-2 border-gray-900 shadow-[4px_4px_0_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="space-y-2">

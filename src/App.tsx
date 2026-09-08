@@ -25,6 +25,7 @@ import AdminPanel from './components/AdminPanel';
 import AiCookingModal from './components/AiCookingModal';
 import { GameCenter } from './components/game/GameCenter';
 import { StudentGameJoin } from './components/game/StudentGameJoin';
+import { ColorStudentGameJoin } from './components/colorGame/ColorStudentGameJoin';
 
 // Icons
 import {
@@ -72,6 +73,9 @@ export default function App() {
   // Game Room state
   const [gameInitialRoomCode, setGameInitialRoomCode] = useState<string>('');
   const [isStudentGameView, setIsStudentGameView] = useState<boolean>(false);
+  const [gameActiveTab, setGameActiveTab] = useState<'quiz' | 'color'>('quiz');
+  const [isColorStudentJoin, setIsColorStudentJoin] = useState<boolean>(false);
+  const [colorInitialRoomCode, setColorInitialRoomCode] = useState<string>('');
 
   const fetchHeaderSettings = async () => {
     try {
@@ -228,11 +232,24 @@ export default function App() {
   const handleHashRouting = (currentProfile: UserProfile | null, currentSession: any) => {
     const hash = window.location.hash;
 
-    // Check if accessing game directly (can be student join with code or without login)
+    // Check if accessing Color Game directly (can be student join with code or without login)
+    if (hash.startsWith('#/game/color/join')) {
+      const code = hash.replace('#/game/color/join/', '').replace('#/game/color/join', '').replace(/^\//, '');
+      setColorInitialRoomCode(code);
+      setIsColorStudentJoin(true);
+      setIsStudentGameView(false);
+      setGameActiveTab('color');
+      setScreen(AppScreen.GAME);
+      return;
+    }
+
+    // Check if accessing Quiz Game directly (can be student join with code or without login)
     if (hash.startsWith('#/game/join')) {
       const code = hash.replace('#/game/join/', '').replace('#/game/join', '').replace(/^\//, '');
       setGameInitialRoomCode(code);
       setIsStudentGameView(true);
+      setIsColorStudentJoin(false);
+      setGameActiveTab('quiz');
       setScreen(AppScreen.GAME);
       return;
     }
@@ -270,8 +287,15 @@ export default function App() {
       setScreen(AppScreen.RPM);
     } else if (hash === '#/ujian') {
       setScreen(AppScreen.UJIAN);
+    } else if (hash === '#/game/color' || hash.startsWith('#/game/color')) {
+      setIsStudentGameView(false);
+      setIsColorStudentJoin(false);
+      setGameActiveTab('color');
+      setScreen(AppScreen.GAME);
     } else if (hash === '#/game' || hash.startsWith('#/game')) {
       setIsStudentGameView(false);
+      setIsColorStudentJoin(false);
+      setGameActiveTab('quiz');
       setScreen(AppScreen.GAME);
     } else if (hash === '#/forum' || hash === '#/community') {
       setScreen(AppScreen.COMMUNITY);
@@ -677,6 +701,21 @@ export default function App() {
   // C. UNAUTHENTICATED GATES: LOGIN & REGISTER & GUEST GAME
   if (!session) {
     if (screen === AppScreen.GAME) {
+      if (isColorStudentJoin) {
+        return (
+          <div className="min-h-screen bg-[#FAF6F0] neo-grid-bg py-8 px-4 flex items-center justify-center font-body" id="guest-color-game-join-wrapper">
+            <ColorStudentGameJoin
+              initialRoomCode={colorInitialRoomCode}
+              onExit={() => {
+                window.location.hash = '#/login';
+                setScreen(AppScreen.LOGIN);
+              }}
+            />
+            {renderStatusIndicator()}
+          </div>
+        );
+      }
+
       return (
         <div className="min-h-screen bg-[#FAF6F0] neo-grid-bg py-8 px-4 flex items-center justify-center font-body" id="guest-game-join-wrapper">
           <StudentGameJoin
@@ -1161,6 +1200,9 @@ export default function App() {
                 onBackToDashboard={handleBackToDashboard}
                 initialRoomCode={gameInitialRoomCode}
                 isStudentJoinView={isStudentGameView}
+                initialTab={gameActiveTab}
+                isColorJoin={isColorStudentJoin}
+                colorRoomCode={colorInitialRoomCode}
               />
             )}
 
