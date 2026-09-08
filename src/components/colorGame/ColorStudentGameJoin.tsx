@@ -130,65 +130,85 @@ export const ColorStudentGameJoin: React.FC<ColorStudentGameJoinProps> = ({
     }
 
     try {
-      // 1. Find game matching room_code
-      const { data: gameData, error: gameErr } = await supabase
-        .from('color_games')
-        .select('*')
-        .eq('room_code', cleanCode)
-        .single();
+      // 1. Coba join via RPC join_color_game terlebih dahulu
+      let gameData: any = null;
+      let newPart: any = null;
+      let roundData: any = null;
 
-      if (gameErr || !gameData) {
-        setJoinError('Room Tebak Warna tidak ditemukan. Periksa kembali Kode Room.');
-        setJoining(false);
-        return;
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('join_color_game', {
+        p_room_code: cleanCode,
+        p_pin: cleanPin,
+        p_participant_name: cleanName
+      });
+
+      if (!rpcErr && rpcData) {
+        gameData = rpcData.game || rpcData;
+        newPart = rpcData.participant || rpcData;
+        roundData = rpcData.rounds;
+      } else {
+        // 2. Fallback jika RPC tidak tersedia atau parameter berbeda
+        const { data: directGame, error: gameErr } = await supabase
+          .from('color_games')
+          .select('*')
+          .eq('room_code', cleanCode)
+          .single();
+
+        if (gameErr || !directGame) {
+          setJoinError('Room Tebak Warna tidak ditemukan. Periksa kembali Kode Room.');
+          setJoining(false);
+          return;
+        }
+
+        if (String(directGame.pin).trim() !== cleanPin) {
+          setJoinError('PIN Room tidak cocok. Silakan minta PIN kepada Guru.');
+          setJoining(false);
+          return;
+        }
+
+        if (directGame.status === 'closed') {
+          setJoinError('Room ini sudah ditutup oleh Guru.');
+          setJoining(false);
+          return;
+        }
+
+        const { data: existingParts, count } = await supabase
+          .from('color_participants')
+          .select('*', { count: 'exact' })
+          .eq('game_id', directGame.id);
+
+        const nextNumber = (count || existingParts?.length || 0) + 1;
+
+        const { data: insertedPart, error: partErr } = await supabase
+          .from('color_participants')
+          .insert({
+            game_id: directGame.id,
+            participant_name: cleanName,
+            participant_number: nextNumber,
+            total_score: 0,
+            rounds_completed: 0
+          })
+          .select()
+          .single();
+
+        if (partErr || !insertedPart) {
+          setJoinError('Gagal bergabung ke room: ' + (partErr?.message || 'Database error'));
+          setJoining(false);
+          return;
+        }
+
+        gameData = directGame;
+        newPart = insertedPart;
       }
 
-      // 2. Validate PIN
-      if (String(gameData.pin).trim() !== cleanPin) {
-        setJoinError('PIN Room tidak cocok. Silakan minta PIN kepada Guru.');
-        setJoining(false);
-        return;
+      // Fetch rounds jika belum ada dari RPC
+      if (!roundData && gameData?.id) {
+        const { data: fetchedRounds } = await supabase
+          .from('color_rounds')
+          .select('*')
+          .eq('game_id', gameData.id)
+          .order('round_number', { ascending: true });
+        roundData = fetchedRounds;
       }
-
-      if (gameData.status === 'closed') {
-        setJoinError('Room ini sudah ditutup oleh Guru.');
-        setJoining(false);
-        return;
-      }
-
-      // 3. Count existing participants to assign next participant_number
-      const { data: existingParts, count } = await supabase
-        .from('color_participants')
-        .select('*', { count: 'exact' })
-        .eq('game_id', gameData.id);
-
-      const nextNumber = (count || existingParts?.length || 0) + 1;
-
-      // 4. Insert participant
-      const { data: newPart, error: partErr } = await supabase
-        .from('color_participants')
-        .insert({
-          game_id: gameData.id,
-          participant_name: cleanName,
-          participant_number: nextNumber,
-          total_score: 0,
-          rounds_completed: 0
-        })
-        .select()
-        .single();
-
-      if (partErr || !newPart) {
-        setJoinError('Gagal bergabung ke room: ' + (partErr?.message || 'Database error'));
-        setJoining(false);
-        return;
-      }
-
-      // 5. Fetch rounds
-      const { data: roundData } = await supabase
-        .from('color_rounds')
-        .select('*')
-        .eq('game_id', gameData.id)
-        .order('round_number', { ascending: true });
 
       setGame(gameData as ColorGame);
       setParticipant(newPart as ColorParticipant);

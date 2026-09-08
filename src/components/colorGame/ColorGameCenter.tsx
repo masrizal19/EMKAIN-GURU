@@ -76,35 +76,83 @@ export const ColorGameCenter: React.FC<ColorGameCenterProps> = ({
     setSubmitting(true);
     setError(null);
 
+    console.log('COLOR CREATE START');
+
     try {
-      const generatedCode = 'CLR' + Math.floor(100 + Math.random() * 900);
-      const generatedPin = String(Math.floor(1000 + Math.random() * 9000));
-      const title = gameTitle.trim() || `Tebak Warna - Mode ${selectedMode.toUpperCase()}`;
+      // 1. Validasi guru sudah login & ambil user ID dari supabase.auth.getUser()
+      const {
+        data: { user },
+        error: authError
+      } = await supabase.auth.getUser();
 
-      // 1. Insert into color_games
-      const { data: newGame, error: gameErr } = await supabase
-        .from('color_games')
-        .insert({
-          creator_id: profile.id,
-          title,
-          mode: selectedMode,
-          room_code: generatedCode,
-          pin: generatedPin,
-          status: 'waiting',
-          current_round: 1,
-          total_rounds: 5
-        })
-        .select()
-        .single();
-
-      if (gameErr || !newGame) {
-        throw new Error(gameErr?.message || 'Gagal membuat room game.');
+      if (authError || !user) {
+        console.error('COLOR CREATE AUTH ERROR:', authError);
+        setError('Anda harus login sebagai guru untuk membuat room.');
+        setSubmitting(false);
+        return;
       }
 
-      // 2. Generate 5 target colors for 5 rounds
+      // 2. Format room code (CLR + 3 digit) dan PIN (4 digit string dengan padding nol)
+      let generatedCode = 'CLR' + Math.floor(100 + Math.random() * 900);
+      const generatedPin = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      const title = gameTitle.trim() || `Tebak Warna - Mode ${selectedMode.toUpperCase()}`;
+
+      console.log('COLOR CREATE REQUEST', {
+        mode: selectedMode,
+        roomCode: generatedCode,
+        pin: '[HIDDEN]'
+      });
+
+      // 3. INSERT ke public.color_games dengan penanganan duplikasi kode unik
+      let game: any = null;
+      let gameError: any = null;
+      let attempts = 0;
+
+      while (attempts < 5) {
+        attempts++;
+        const { data: insertedGame, error: insertErr } = await supabase
+          .from('color_games')
+          .insert({
+            creator_id: user.id,
+            title: title,
+            mode: selectedMode, // lowercase: 'easy' | 'medium' | 'hard'
+            room_code: generatedCode,
+            pin: generatedPin,
+            status: 'waiting',
+            current_round: 1,
+            total_rounds: 5
+          })
+          .select()
+          .single();
+
+        if (insertErr && (insertErr.code === '23505' || insertErr.message?.includes('unique') || insertErr.message?.includes('duplicate'))) {
+          // Generate ulang room code jika terjadi tabrakan unik
+          generatedCode = 'CLR' + Math.floor(100 + Math.random() * 900);
+          continue;
+        }
+
+        game = insertedGame;
+        gameError = insertErr;
+        break;
+      }
+
+      console.log('COLOR CREATE DATABASE RESULT', {
+        game,
+        error: gameError
+      });
+
+      // Validasi row game dari database
+      if (gameError || !game || !game.id) {
+        console.error('COLOR GAME CREATE ERROR:', gameError);
+        setError(gameError?.message || 'Gagal menyimpan room game ke database Supabase.');
+        setSubmitting(false);
+        return;
+      }
+
+      // 4. Generate 5 target colors dan INSERT ke public.color_rounds menggunakan game.id asli (UUID)
       const colors = generate5TargetColors(selectedMode);
       const roundsToInsert = colors.map((c, idx) => ({
-        game_id: newGame.id,
+        game_id: game.id,
         round_number: idx + 1,
         target_color: c.hex,
         target_r: c.r,
@@ -112,23 +160,48 @@ export const ColorGameCenter: React.FC<ColorGameCenterProps> = ({
         target_b: c.b
       }));
 
-      const { error: roundErr } = await supabase
+      const { data: insertedRounds, error: roundsError } = await supabase
         .from('color_rounds')
-        .insert(roundsToInsert);
+        .insert(roundsToInsert)
+        .select();
 
-      if (roundErr) {
-        console.warn('Failed to insert rounds, rollback game:', roundErr);
-        await supabase.from('color_games').delete().eq('id', newGame.id);
-        throw new Error(roundErr.message);
+      console.log('COLOR ROUNDS RESULT', {
+        rounds: insertedRounds,
+        error: roundsError
+      });
+
+      // Validasi rounds: jika gagal, lakukan rollback dan batalkan
+      if (roundsError || !insertedRounds || insertedRounds.length === 0) {
+        console.error('COLOR ROUNDS INSERT ERROR, rollback game:', roundsError);
+        await supabase.from('color_games').delete().eq('id', game.id);
+        setError(roundsError?.message || 'Gagal membuat 5 ronde warna di database.');
+        setSubmitting(false);
+        return;
       }
 
-      // 3. Reset form and immediately open host view
+      // 5. Inisialisasi / Sync public state (public.color_game_public_state)
+      try {
+        await supabase
+          .from('color_game_public_state')
+          .upsert({
+            game_id: game.id,
+            status: 'waiting',
+            mode: selectedMode,
+            current_round: 1,
+            total_rounds: 5,
+            participant_count: 0
+          });
+      } catch (pubErr) {
+        console.warn('Public state sync notification:', pubErr);
+      }
+
+      // 6. BARU tampilkan room berhasil dibuat kepada guru setelah database mengembalikan row asli
       setIsCreating(false);
       setGameTitle('');
-      setActiveGameId(newGame.id);
+      setActiveGameId(game.id);
 
     } catch (err: any) {
-      console.error('Create color game error:', err);
+      console.error('COLOR CREATE UNEXPECTED ERROR:', err);
       setError(err.message || 'Terjadi kesalahan saat membuat game tebak warna.');
     } finally {
       setSubmitting(false);
