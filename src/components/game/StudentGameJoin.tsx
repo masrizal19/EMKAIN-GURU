@@ -644,17 +644,22 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
   // Submit Answer Handler via Supabase RPC
   const handleSelectAnswer = async (option: 'A' | 'B' | 'C' | 'D') => {
-    if (isLocked || !room || !participant || secondsLeft <= 0) return;
+    if (isLocked || !room || !participant || !activeQuestion || secondsLeft <= 0) return;
 
     setSelectedOption(option);
     setIsLocked(true);
 
+    const timePerQ = room.time_per_question || 20;
+    const elapsedSeconds = Math.max(0, timePerQ - secondsLeft);
+    const responseTimeMs = Math.round(elapsedSeconds * 1000);
+
     try {
       const { data, error: rpcError } = await supabase.rpc('submit_game_answer', {
         p_game_id: room.id,
+        p_question_id: activeQuestion.id,
         p_participant_id: participant.id,
-        p_session_token: participant.session_token,
-        p_answer: option
+        p_answer: option,
+        p_response_time_ms: responseTimeMs
       });
 
       if (rpcError) {

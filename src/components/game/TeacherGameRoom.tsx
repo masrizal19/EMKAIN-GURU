@@ -348,6 +348,31 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     }
   };
 
+  // Set Correct Answer handler via direct RPC
+  const handleSetCorrectAnswer = async (questionId: string, correctLetter: 'A' | 'B' | 'C' | 'D') => {
+    if (!questionId) return;
+    try {
+      const { error: rpcErr } = await supabase.rpc('set_game_question_correct_answer', {
+        p_question_id: questionId,
+        p_correct_answer: correctLetter
+      });
+
+      if (rpcErr) {
+        console.error('[SET CORRECT ANSWER ERROR]', rpcErr);
+        alert('Gagal mengubah kunci jawaban: ' + (rpcErr.message || 'Error'));
+        return;
+      }
+
+      // Update local state on success
+      setQuestions((prev) =>
+        prev.map((q) => (q.id === questionId ? { ...q, correct_answer: correctLetter } : q))
+      );
+    } catch (e: any) {
+      console.error('[SET CORRECT ANSWER EXCEPTION]', e);
+      alert('Terjadi kesalahan saat mengubah kunci jawaban');
+    }
+  };
+
   // Close room handler
   const handleCloseRoom = async () => {
     if (!room) return;
@@ -646,23 +671,32 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
                 return (
                   <div
                     key={opt}
-                    className={`p-3.5 rounded-xl border-2 border-gray-900 flex items-start gap-3 ${
+                    className={`p-3.5 rounded-xl border-2 border-gray-900 flex items-start justify-between gap-3 ${
                       isCorrect ? 'bg-emerald-50 border-emerald-600 shadow-[2px_2px_0_rgba(0,0,0,1)]' : 'bg-white'
                     }`}
                   >
-                    <span className={`w-8 h-8 rounded-lg border-2 border-gray-900 flex items-center justify-center font-black text-xs text-gray-900 flex-shrink-0 ${badgeBg}`}>
-                      {opt}
-                    </span>
-                    <div className="flex-1">
-                      <div className="text-xs md:text-sm font-bold text-gray-900 leading-normal [overflow-wrap:anywhere]">
-                        {(currentQ as any)[optKey]}
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <span className={`w-8 h-8 rounded-lg border-2 border-gray-900 flex items-center justify-center font-black text-xs text-gray-900 flex-shrink-0 ${badgeBg}`}>
+                        {opt}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs md:text-sm font-bold text-gray-900 leading-normal [overflow-wrap:anywhere]">
+                          {(currentQ as any)[optKey]}
+                        </div>
                       </div>
-                      {isCorrect && (
-                        <span className="inline-block mt-1 text-[10px] font-black uppercase text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-400">
-                          ✓ KUNCI JAWABAN BENAR
-                        </span>
-                      )}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSetCorrectAnswer(currentQ.id, opt)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase border cursor-pointer transition-all flex-shrink-0 ${
+                        isCorrect
+                          ? 'bg-emerald-500 text-white border-emerald-700 shadow-xs'
+                          : 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300'
+                      }`}
+                    >
+                      {isCorrect ? '✓ KUNCI BENAR' : 'SET BENAR'}
+                    </button>
                   </div>
                 );
               })}

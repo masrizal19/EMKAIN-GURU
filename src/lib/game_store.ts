@@ -430,6 +430,7 @@ export async function nextQuestionApi(roomId: string): Promise<{ success: boolea
 export async function submitGameAnswerApi(payload: {
   roomId?: string;
   gameId?: string;
+  questionId?: string;
   participantId: string;
   sessionToken?: string;
   questionIndex?: number;
@@ -446,13 +447,15 @@ export async function submitGameAnswerApi(payload: {
 }> {
   try {
     const gId = payload.gameId || payload.roomId;
-    const sToken = payload.sessionToken || '00000000-0000-0000-0000-000000000000';
+    const qId = payload.questionId;
+    const respTime = payload.responseTimeMs || 0;
 
     const { data, error } = await supabase.rpc('submit_game_answer', {
       p_game_id: gId,
+      p_question_id: qId,
       p_participant_id: payload.participantId,
-      p_session_token: sToken,
-      p_answer: payload.answer
+      p_answer: payload.answer,
+      p_response_time_ms: respTime
     });
 
     if (error) {
@@ -470,6 +473,28 @@ export async function submitGameAnswerApi(payload: {
   } catch (err: any) {
     console.error('[GAME ERROR]', err);
     return { success: false, error: err?.message || 'Terjadi kesalahan pada Game' };
+  }
+}
+
+export async function setGameQuestionCorrectAnswerApi(
+  questionId: string,
+  correctAnswer: 'A' | 'B' | 'C' | 'D'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase.rpc('set_game_question_correct_answer', {
+      p_question_id: questionId,
+      p_correct_answer: correctAnswer
+    });
+
+    if (error) {
+      console.error('[SET CORRECT ANSWER ERROR]', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[SET CORRECT ANSWER ERROR]', err);
+    return { success: false, error: err?.message || 'Terjadi kesalahan' };
   }
 }
 

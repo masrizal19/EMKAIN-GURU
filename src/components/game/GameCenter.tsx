@@ -165,6 +165,35 @@ export const GameCenter: React.FC<GameCenterProps> = ({
     }
   };
 
+  const handleSetCorrectAnswerInDetail = async (questionId: string, correctLetter: 'A' | 'B' | 'C' | 'D') => {
+    if (!questionId) return;
+    try {
+      const { error: rpcErr } = await supabase.rpc('set_game_question_correct_answer', {
+        p_question_id: questionId,
+        p_correct_answer: correctLetter
+      });
+
+      if (rpcErr) {
+        console.error('[SET CORRECT ANSWER ERROR]', rpcErr);
+        alert('Gagal mengubah kunci jawaban: ' + (rpcErr.message || 'Error'));
+        return;
+      }
+
+      setSelectedGameDetail((prev: any) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          questions: prev.questions.map((q: any) =>
+            q.id === questionId ? { ...q, correct_answer: correctLetter, correctAnswer: correctLetter } : q
+          )
+        };
+      });
+    } catch (e: any) {
+      console.error('[SET CORRECT ANSWER EXCEPTION]', e);
+      alert('Terjadi kesalahan saat mengubah kunci jawaban');
+    }
+  };
+
   // If viewing teacher room
   if (activeTeacherRoomId) {
     return (
@@ -655,25 +684,34 @@ export const GameCenter: React.FC<GameCenterProps> = ({
                                 return (
                                   <div
                                     key={key}
-                                    className={`p-2 rounded-lg border text-xs font-bold flex items-center gap-2 ${
+                                    className={`p-2 rounded-lg border text-xs font-bold flex items-center justify-between gap-2 ${
                                       isCorrect
                                         ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-black ring-1 ring-emerald-500'
                                         : 'bg-[#FAF6F0] border-gray-300 text-gray-700'
                                     }`}
                                   >
-                                    <span
-                                      className={`w-5 h-5 rounded-sm flex items-center justify-center text-[10px] font-black ${
-                                        isCorrect ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      <span
+                                        className={`w-5 h-5 rounded-sm flex items-center justify-center text-[10px] font-black flex-shrink-0 ${
+                                          isCorrect ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'
+                                        }`}
+                                      >
+                                        {key}
+                                      </span>
+                                      <span className="flex-1 line-clamp-2">{text}</span>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetCorrectAnswerInDetail(q.id, key as any)}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border cursor-pointer transition-all flex-shrink-0 ${
+                                        isCorrect
+                                          ? 'bg-emerald-500 text-white border-emerald-700 shadow-xs'
+                                          : 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300'
                                       }`}
                                     >
-                                      {key}
-                                    </span>
-                                    <span className="flex-1 line-clamp-2">{text}</span>
-                                    {isCorrect && (
-                                      <span className="text-[10px] font-black text-emerald-700 flex items-center gap-0.5">
-                                        ✓ BENAR
-                                      </span>
-                                    )}
+                                      {isCorrect ? '✓ KUNCI BENAR' : 'SET BENAR'}
+                                    </button>
                                   </div>
                                 );
                               })}
