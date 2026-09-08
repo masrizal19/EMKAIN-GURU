@@ -232,6 +232,8 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     }
   };
 
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(false);
+
   // Restore session on mount if student refreshes page
   useEffect(() => {
     const code = (initialRoomCode || roomCode || '').trim().toUpperCase();
@@ -248,7 +250,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     }
   }, [initialRoomCode]);
 
-  // Complete Supabase Realtime subscriptions (game-state, game-leaderboard, game-lobby, game-room)
+  // Single Supabase Realtime subscription via postgres_changes
   useEffect(() => {
     const targetGameId = room?.id;
     const targetPartId = participant?.id;
@@ -258,77 +260,9 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
     console.log('[GAME REALTIME] subscribing for game', targetGameId);
 
-    // 1. game-state:${targetGameId} (Broadcast)
-    const stateChannel = supabase
-      .channel(`game-state:${targetGameId}`)
-      .on('broadcast', { event: 'game_state_changed' }, (payload: any) => {
-        console.log('[GAME REALTIME] event game_state_changed', payload);
-        const state = payload?.payload || payload;
-        console.log('[GAME STATE] changed', state);
+    const channel = supabase.channel(`game-realtime-${targetGameId}`);
 
-        if (state) {
-          const incomingOrder = state.current_question_order;
-          const incomingStatus = state.status;
-
-          if (incomingStatus === 'finished') {
-            loadGameState(targetGameId, targetPartId, targetToken);
-            loadLeaderboard(targetGameId);
-            return;
-          }
-
-          if (
-            incomingStatus !== lastKnownStatusRef.current ||
-            (incomingOrder !== undefined && incomingOrder !== lastKnownOrderRef.current) ||
-            (incomingStatus === 'playing' && !activeQuestionRef.current)
-          ) {
-            loadGameState(targetGameId, targetPartId, targetToken);
-          }
-        } else {
-          loadGameState(targetGameId, targetPartId, targetToken);
-        }
-      })
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-state', targetGameId);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-state', err);
-        }
-      });
-
-    // 2. game-leaderboard:${targetGameId} (Broadcast)
-    const leaderboardChannel = supabase
-      .channel(`game-leaderboard:${targetGameId}`)
-      .on('broadcast', { event: 'leaderboard_changed' }, (payload: any) => {
-        console.log('[GAME REALTIME] event leaderboard_changed', payload);
-        console.log('[GAME LEADERBOARD] changed', payload);
-        loadLeaderboard(targetGameId);
-      })
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-leaderboard', targetGameId);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-leaderboard', err);
-        }
-      });
-
-    // 3. game-lobby:${targetGameId} (Broadcast)
-    const lobbyChannel = supabase
-      .channel(`game-lobby:${targetGameId}`)
-      .on('broadcast', { event: 'participant_count_changed' }, (payload: any) => {
-        console.log('[GAME REALTIME] event participant_count_changed', payload);
-        console.log('[GAME PARTICIPANT] changed', payload);
-      })
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-lobby', targetGameId);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-lobby', err);
-        }
-      });
-
-    // 4. game-room:${targetGameId} (General Room Channel: postgres_changes + broadcasts)
-    const roomChannel = supabase
-      .channel(`game-room:${targetGameId}`)
+    channel
       .on(
         'postgres_changes',
         {
@@ -338,14 +272,32 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           filter: `id=eq.${targetGameId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] event game_rooms postgres_changes', payload);
+          console.log('[GAME REALTIME] GAME ROOM UPDATE', payload);
           if (payload.new) {
-            const updated = payload.new;
-            if (
-              updated.status !== lastKnownStatusRef.current ||
-              (updated.current_question_order !== undefined && updated.current_question_order !== lastKnownOrderRef.current) ||
-              (updated.status === 'playing' && !activeQuestionRef.current)
-            ) {
+            const updated = payload.new as any;
+            if (updated.status === 'finished') {
+              console.log('[GAME REALTIME] GAME FINISHED');
+              loadGameState(targetGameId, targetPartId, targetToken);
+              loadLeaderboard(targetGameId);
+              return;
+            }
+
+            if (updated.status === 'closed') {
+              setRoom((prev) => (prev ? { ...prev, status: 'closed' } : null));
+              return;
+            }
+
+            const isOrderChanged =
+              updated.current_question_order !== undefined &&
+              updated.current_question_order !== lastKnownOrderRef.current;
+            const isStatusChanged = updated.status !== lastKnownStatusRef.current;
+            const needsActiveQuestion = updated.status === 'playing' && !activeQuestionRef.current;
+
+            if (isOrderChanged) {
+              console.log('[GAME REALTIME] QUESTION CHANGED', updated.current_question_order);
+            }
+
+            if (isStatusChanged || isOrderChanged || needsActiveQuestion) {
               loadGameState(targetGameId, targetPartId, targetToken);
             }
           }
@@ -357,24 +309,29 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           event: '*',
           schema: 'public',
           table: 'game_participants',
-          filter: `id=eq.${targetPartId}`
+          filter: `game_id=eq.${targetGameId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] event my participant postgres_changes', payload);
+          console.log('[GAME REALTIME] PARTICIPANT UPDATE', payload);
           if (payload.new) {
-            const updated = payload.new;
-            setParticipant((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    total_score: updated.total_score !== undefined ? updated.total_score : prev.total_score,
-                    correct_count: updated.correct_count !== undefined ? updated.correct_count : prev.correct_count,
-                    wrong_count: updated.wrong_count !== undefined ? updated.wrong_count : prev.wrong_count,
-                    unanswered_count: updated.unanswered_count !== undefined ? updated.unanswered_count : prev.unanswered_count
-                  }
-                : null
-            );
+            const updated = payload.new as any;
+            if (updated.id === targetPartId) {
+              console.log('[GAME REALTIME] SCORE CHANGED', updated.total_score);
+              setParticipant((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      total_score: updated.total_score !== undefined ? updated.total_score : prev.total_score,
+                      correct_count: updated.correct_count !== undefined ? updated.correct_count : prev.correct_count,
+                      wrong_count: updated.wrong_count !== undefined ? updated.wrong_count : prev.wrong_count,
+                      unanswered_count: updated.unanswered_count !== undefined ? updated.unanswered_count : prev.unanswered_count
+                    }
+                  : null
+              );
+            }
           }
+          // Refresh leaderboard whenever participant scores update
+          loadLeaderboard(targetGameId);
         }
       )
       .on(
@@ -386,32 +343,35 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           filter: `game_id=eq.${targetGameId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] event game_answers postgres_changes', payload);
+          console.log('[GAME REALTIME] ANSWER UPDATE', payload);
           loadLeaderboard(targetGameId);
         }
       )
-      .on('broadcast', { event: '*' }, (payload: any) => {
-        console.log('[GAME REALTIME] event room broadcast', payload);
-        loadGameState(targetGameId, targetPartId, targetToken);
-      })
       .subscribe((status, err) => {
+        console.log('[GAME REALTIME]', status, targetGameId);
         if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-room', targetGameId);
+          console.log('[GAME REALTIME] SUBSCRIBED');
+          setIsRealtimeConnected(true);
         } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-room', err);
+          console.log('[GAME REALTIME] CHANNEL_ERROR');
+          if (err) console.error('[GAME REALTIME] channel error details', err);
+          setIsRealtimeConnected(false);
+        } else if (status === 'TIMED_OUT') {
+          console.log('[GAME REALTIME] TIMED_OUT');
+          setIsRealtimeConnected(false);
+        } else if (status === 'CLOSED') {
+          console.log('[GAME REALTIME] CLOSED');
+          setIsRealtimeConnected(false);
         }
       });
 
     return () => {
-      console.log('[GAME REALTIME] cleaning up channels for', targetGameId);
-      supabase.removeChannel(stateChannel);
-      supabase.removeChannel(leaderboardChannel);
-      supabase.removeChannel(lobbyChannel);
-      supabase.removeChannel(roomChannel);
+      console.log('[GAME REALTIME] cleaning up channel for', targetGameId);
+      supabase.removeChannel(channel);
     };
   }, [room?.id, participant?.id, participant?.session_token]);
 
-  // Fallback polling: if status is 'waiting' or 'playing', check room state lightly every 1.5s
+  // Fallback polling: active when realtime disconnected or when waiting
   useEffect(() => {
     const targetGameId = room?.id;
     const targetPartId = participant?.id;
@@ -422,6 +382,9 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     if (currentStatus !== 'waiting' && currentStatus !== 'playing') return;
 
     const interval = setInterval(async () => {
+      // If realtime is healthy and already playing, no need to poll
+      if (isRealtimeConnected && currentStatus === 'playing') return;
+
       try {
         const { data: rData } = await supabase
           .from('game_rooms')
@@ -444,7 +407,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [room?.id, room?.status, participant?.id, participant?.session_token]);
+  }, [room?.id, room?.status, participant?.id, participant?.session_token, isRealtimeConnected]);
 
   // Periodic leaderboard sync if playing or finished
   useEffect(() => {

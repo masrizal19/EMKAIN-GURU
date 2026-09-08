@@ -159,66 +159,16 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     };
   }, [roomIdOrCode]);
 
-  // Complete Realtime Subscriptions for Teacher (game-state, game-leaderboard, game-lobby, game-room)
+  // Single Realtime Subscription for Teacher via postgres_changes
   useEffect(() => {
     if (!room?.id) return;
     const gId = room.id;
 
-    console.log('[GAME REALTIME] teacher subscribing for room', gId);
+    console.log('[GAME REALTIME] subscribing for game', gId);
 
-    // 1. game-state:${gId}
-    const stateChannel = supabase
-      .channel(`game-state:${gId}`)
-      .on('broadcast', { event: 'game_state_changed' }, (payload: any) => {
-        console.log('[GAME REALTIME] event game_state_changed (teacher)', payload);
-        const state = payload?.payload || payload;
-        console.log('[GAME STATE] changed (teacher)', state);
-        loadRoomData();
-        loadLeaderboard(gId);
-      })
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-state (teacher)', gId);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-state (teacher)', err);
-        }
-      });
+    const channel = supabase.channel(`game-realtime-${gId}`);
 
-    // 2. game-leaderboard:${gId}
-    const leaderboardChannel = supabase
-      .channel(`game-leaderboard:${gId}`)
-      .on('broadcast', { event: 'leaderboard_changed' }, (payload: any) => {
-        console.log('[GAME REALTIME] event leaderboard_changed (teacher)', payload);
-        console.log('[GAME LEADERBOARD] changed (teacher)', payload);
-        loadLeaderboard(gId);
-      })
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-leaderboard (teacher)', gId);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-leaderboard (teacher)', err);
-        }
-      });
-
-    // 3. game-lobby:${gId}
-    const lobbyChannel = supabase
-      .channel(`game-lobby:${gId}`)
-      .on('broadcast', { event: 'participant_count_changed' }, (payload: any) => {
-        console.log('[GAME REALTIME] event participant_count_changed (teacher)', payload);
-        console.log('[GAME PARTICIPANT] changed (teacher)', payload);
-        loadParticipants(gId);
-      })
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-lobby (teacher)', gId);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-lobby (teacher)', err);
-        }
-      });
-
-    // 4. game-room:${gId} (General channel for postgres_changes + broadcasts)
-    const roomChannel = supabase
-      .channel(`game-room:${gId}`)
+    channel
       .on(
         'postgres_changes',
         {
@@ -228,8 +178,23 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
           filter: `id=eq.${gId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] event game_rooms (teacher)', payload);
-          loadRoomData();
+          console.log('[GAME REALTIME] GAME ROOM UPDATE', payload);
+          if (payload.new) {
+            const updated = payload.new;
+            if (updated.status === 'finished') {
+              console.log('[GAME REALTIME] GAME FINISHED');
+              fetchGameResultsApi(gId).then((resData) => {
+                if (resData.success && resData.results) {
+                  setFinalResults(resData.results);
+                }
+              });
+              loadLeaderboard(gId);
+            }
+            if (updated.current_question_order !== undefined) {
+              console.log('[GAME REALTIME] QUESTION CHANGED', updated.current_question_order);
+            }
+            loadRoomData();
+          }
         }
       )
       .on(
@@ -241,7 +206,7 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
           filter: `game_id=eq.${gId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] event game_participants (teacher)', payload);
+          console.log('[GAME REALTIME] PARTICIPANT UPDATE', payload);
           loadParticipants(gId);
           loadLeaderboard(gId);
         }
@@ -255,29 +220,27 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
           filter: `game_id=eq.${gId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] event game_answers (teacher)', payload);
+          console.log('[GAME REALTIME] ANSWER UPDATE', payload);
           loadLeaderboard(gId);
         }
       )
-      .on('broadcast', { event: '*' }, (payload: any) => {
-        console.log('[GAME REALTIME] event broadcast (teacher)', payload);
-        loadRoomData();
-        loadLeaderboard(gId);
-      })
       .subscribe((status, err) => {
+        console.log('[GAME REALTIME]', status, gId);
         if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] connected game-room (teacher)', gId);
+          console.log('[GAME REALTIME] SUBSCRIBED');
         } else if (status === 'CHANNEL_ERROR') {
-          console.error('[GAME REALTIME] channel error game-room (teacher)', err);
+          console.log('[GAME REALTIME] CHANNEL_ERROR');
+          if (err) console.error('[GAME REALTIME] channel error details', err);
+        } else if (status === 'TIMED_OUT') {
+          console.log('[GAME REALTIME] TIMED_OUT');
+        } else if (status === 'CLOSED') {
+          console.log('[GAME REALTIME] CLOSED');
         }
       });
 
     return () => {
-      console.log('[GAME REALTIME] cleaning up teacher channels for', gId);
-      supabase.removeChannel(stateChannel);
-      supabase.removeChannel(leaderboardChannel);
-      supabase.removeChannel(lobbyChannel);
-      supabase.removeChannel(roomChannel);
+      console.log('[GAME REALTIME] cleaning up channel for', gId);
+      supabase.removeChannel(channel);
     };
   }, [room?.id]);
 
