@@ -4,8 +4,8 @@
  */
 
 import React, { useState } from 'react';
-import { X, Plus, Trash2, CheckCircle2, Copy, Share2, Sparkles, ArrowRight, ArrowLeft } from 'lucide-react';
-import { createGameRoomApi } from '../../lib/game_store';
+import { X, Plus, Trash2, CheckCircle2, Copy, Sparkles, ArrowRight, ArrowLeft, Play } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 import { GameRoom } from '../../types';
 
 interface CreateGameModalProps {
@@ -95,8 +95,19 @@ export const CreateGameModal: React.FC<CreateGameModalProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Game creation result state
+  const [createdData, setCreatedData] = useState<{
+    success: boolean;
+    game_id: string;
+    room_code: string;
+    pin: string;
+    question_count: number;
+    status: string;
+  } | null>(null);
   const [createdRoom, setCreatedRoom] = useState<GameRoom | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedPin, setCopiedPin] = useState(false);
 
   if (!isOpen) return null;
 
@@ -148,29 +159,39 @@ export const CreateGameModal: React.FC<CreateGameModalProps> = ({
     e.preventDefault();
     setError(null);
 
+    // 1. Validasi
     if (!title.trim()) {
-      setError('Judul Game wajib diisi.');
+      setError('Judul game wajib diisi.');
       return;
     }
     if (!subject.trim()) {
-      setError('Mata Pelajaran wajib diisi.');
+      setError('Mata pelajaran wajib diisi.');
       return;
     }
     if (!classLevel.trim()) {
       setError('Kelas wajib diisi.');
       return;
     }
+    if (questions.length < 5 || questions.length > 20) {
+      setError('Jumlah soal harus antara 5 hingga 20 soal.');
+      return;
+    }
 
-    // Validate each question
+    // Semua soal harus lengkap, A/B/C/D lengkap, correct_answer A/B/C/D
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       if (!q.question.trim()) {
-        setError(`Soal ${i + 1} belum memiliki teks pertanyaan.`);
+        setError(`Soal nomor ${i + 1} belum memiliki teks pertanyaan.`);
         setCurrentIdx(i);
         return;
       }
       if (!q.option_a.trim() || !q.option_b.trim() || !q.option_c.trim() || !q.option_d.trim()) {
-        setError(`Soal ${i + 1} harus memiliki semua pilihan jawaban A, B, C, dan D lengkap.`);
+        setError(`Soal nomor ${i + 1} harus memiliki semua pilihan jawaban A, B, C, dan D lengkap.`);
+        setCurrentIdx(i);
+        return;
+      }
+      if (!['A', 'B', 'C', 'D'].includes(q.correct_answer)) {
+        setError(`Soal nomor ${i + 1} harus memiliki kunci jawaban A, B, C, atau D.`);
         setCurrentIdx(i);
         return;
       }
@@ -178,62 +199,97 @@ export const CreateGameModal: React.FC<CreateGameModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await createGameRoomApi({
+      // 2. Bentuk payload
+      const questionsPayload = questions.map((q) => ({
+        question: q.question.trim(),
+        option_a: q.option_a.trim(),
+        option_b: q.option_b.trim(),
+        option_c: q.option_c.trim(),
+        option_d: q.option_d.trim(),
+        correct_answer: q.correct_answer
+      }));
+
+      // 3. Panggil Supabase RPC: public.save_game
+      const { data, error: rpcError } = await supabase.rpc('save_game', {
+        p_title: title.trim(),
+        p_subject: subject.trim(),
+        p_class_name: classLevel.trim(),
+        p_time_per_question: timePerQuestion,
+        p_questions: questionsPayload
+      });
+
+      // 4. Jika error: tampilkan error asli dari Supabase
+      if (rpcError) {
+        console.error('[GAME SAVE ERROR]', rpcError);
+        setError(rpcError.message || 'Gagal terhubung ke Supabase. Periksa konfigurasi Supabase dan RPC Game.');
+        setLoading(false);
+        return;
+      }
+
+      if (!data || !data.success) {
+        console.error('[GAME SAVE ERROR]', data);
+        setError(data?.message || 'Gagal menyimpan game ke Supabase.');
+        setLoading(false);
+        return;
+      }
+
+      // 5 & 6. Simpan data tersebut ke state Game
+      setCreatedData({
+        success: data.success,
+        game_id: data.game_id,
+        room_code: data.room_code,
+        pin: data.pin,
+        question_count: data.question_count || questions.length,
+        status: data.status || 'waiting'
+      });
+
+      const roomObj: GameRoom = {
+        id: data.game_id,
         title: title.trim(),
         subject: subject.trim(),
         class_level: classLevel.trim(),
-        question_count: questions.length,
+        pin: String(data.pin),
+        room_code: String(data.room_code),
+        status: (data.status as any) || 'waiting',
+        current_question_index: 0,
+        question_count: data.question_count || questions.length,
         time_per_question: timePerQuestion,
-        questions: questions.map(q => ({
-          question: q.question.trim(),
-          option_a: q.option_a.trim(),
-          option_b: q.option_b.trim(),
-          option_c: q.option_c.trim(),
-          option_d: q.option_d.trim(),
-          correct_answer: q.correct_answer
-        })),
         creator_id: creatorId,
-        creator_name: creatorName
-      });
+        creator_name: creatorName,
+        created_at: new Date().toISOString()
+      };
+      setCreatedRoom(roomObj);
 
-      if (res.success && res.room) {
-        setCreatedRoom(res.room);
-      } else {
-        setError(res.error || 'Gagal membuat room kuis.');
-      }
     } catch (err: any) {
-      setError(err.message || 'Terjadi kesalahan sistem');
+      console.error('[GAME SAVE ERROR]', err);
+      setError(err.message || 'Gagal terhubung ke Supabase. Periksa konfigurasi Supabase dan RPC Game.');
     } finally {
       setLoading(false);
     }
   };
 
-  const gameJoinUrl = createdRoom 
-    ? `${window.location.origin}${window.location.pathname}#/game/join/${createdRoom.room_code}`
+  // Section B: Link game berdasarkan route aplikasi yang SUDAH ADA
+  const gameLink = createdData 
+    ? `${window.location.origin}/#/game/join/${createdData.room_code}`
     : '';
 
   const handleCopyLink = () => {
-    if (!gameJoinUrl) return;
-    navigator.clipboard.writeText(gameJoinUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    if (!gameLink) return;
+    navigator.clipboard.writeText(gameLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  const handleShare = async () => {
-    if (!createdRoom) return;
-    const shareText = `Yuk ikuti Game Kuis EMKAIN: ${createdRoom.title}!\nKode: ${createdRoom.room_code}\nPIN: ${createdRoom.pin}\nLink: ${gameJoinUrl}`;
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: createdRoom.title,
-          text: shareText,
-          url: gameJoinUrl
-        });
-      } catch {
-        handleCopyLink();
-      }
-    } else {
-      handleCopyLink();
+  const handleCopyPin = () => {
+    if (!createdData) return;
+    navigator.clipboard.writeText(String(createdData.pin));
+    setCopiedPin(true);
+    setTimeout(() => setCopiedPin(false), 2500);
+  };
+
+  const handleStartGame = () => {
+    if (createdRoom) {
+      onGameCreated(createdRoom);
     }
   };
 
@@ -247,10 +303,10 @@ export const CreateGameModal: React.FC<CreateGameModalProps> = ({
             <span className="text-2xl">🎮</span>
             <div>
               <h2 className="text-lg md:text-xl font-black font-display uppercase tracking-tight text-gray-900 leading-none">
-                {createdRoom ? 'GAME SIAP DIMAINKAN!' : 'BUAT GAME KUIS REALTIME'}
+                {createdData ? 'GAME BERHASIL DIBUAT' : 'BUAT GAME KUIS REALTIME'}
               </h2>
               <p className="text-[11px] font-bold text-gray-700 mt-0.5">
-                {createdRoom ? 'Bagikan PIN & link ke siswa Anda untuk mulai kuis' : 'Atur info game dan susun 5 - 20 butir soal kuis'}
+                {createdData ? 'Room Code dan PIN siap dibagikan ke seluruh siswa' : 'Atur info game dan susun 5 - 20 butir soal kuis'}
               </p>
             </div>
           </div>
@@ -265,35 +321,35 @@ export const CreateGameModal: React.FC<CreateGameModalProps> = ({
         {/* MODAL BODY */}
         <div className="p-4 md:p-6 overflow-y-auto flex-1 space-y-6">
           
-          {createdRoom ? (
-            /* SUCCESS VIEW: GAME READY TO SHARE */
-            <div className="space-y-6 text-center py-4">
+          {createdData ? (
+            /* SECTION A.7: SUCCESS VIEW (GAME BERHASIL DIBUAT) */
+            <div className="space-y-6 text-center py-4" id="game-created-success-modal">
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#C1F2D0] border-2 border-gray-900 shadow-[3px_3px_0_rgba(0,0,0,1)] text-3xl mx-auto">
                 🎉
               </div>
 
               <div>
                 <h3 className="text-2xl font-black font-display uppercase text-gray-900">
-                  {createdRoom.title}
+                  GAME BERHASIL DIBUAT
                 </h3>
                 <p className="text-xs font-bold text-gray-600 mt-1">
-                  {createdRoom.subject} • {createdRoom.class_level} • {createdRoom.question_count} Soal • {createdRoom.time_per_question} Detik/Soal
+                  {title} • {subject} • Kelas {classLevel} • {createdData.question_count} Soal ({timePerQuestion} Detik/Soal)
                 </p>
               </div>
 
-              {/* PIN & CODE CARDS */}
+              {/* ROOM CODE & PIN CARDS */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md mx-auto">
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-900 shadow-[3px_3px_0_rgba(0,0,0,1)] text-center">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">PIN GAME</div>
-                  <div className="text-3xl font-black tracking-wider text-[#1E1E1E] font-display mt-1">
-                    {createdRoom.pin}
+                  <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">ROOM CODE</div>
+                  <div className="text-3xl font-black tracking-wider text-blue-600 font-display mt-1 select-all">
+                    {createdData.room_code}
                   </div>
                 </div>
 
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-900 shadow-[3px_3px_0_rgba(0,0,0,1)] text-center">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">KODE ROOM</div>
-                  <div className="text-3xl font-black tracking-wider text-blue-600 font-display mt-1">
-                    {createdRoom.room_code}
+                  <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">PIN</div>
+                  <div className="text-3xl font-black tracking-wider text-[#1E1E1E] font-display mt-1 select-all">
+                    {createdData.pin}
                   </div>
                 </div>
               </div>
@@ -304,37 +360,49 @@ export const CreateGameModal: React.FC<CreateGameModalProps> = ({
                   LINK GAME UNTUK SISWA
                 </div>
                 <div className="p-2.5 bg-white rounded-lg border border-gray-900 text-xs font-mono font-bold text-gray-700 break-all select-all">
-                  {gameJoinUrl}
-                </div>
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={handleCopyLink}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 bg-white hover:bg-gray-50 border-2 border-gray-900 rounded-xl font-black text-xs uppercase cursor-pointer shadow-[2px_2px_0_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                  >
-                    {copied ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                    <span>{copied ? 'LINK TERSALIN!' : 'SALIN LINK'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleShare}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 bg-[#FFD166] hover:bg-yellow-300 border-2 border-gray-900 rounded-xl font-black text-xs uppercase cursor-pointer shadow-[2px_2px_0_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                  >
-                    <Share2 className="w-4 h-4" />
-                    <span>BAGIKAN GAME</span>
-                  </button>
+                  {gameLink}
                 </div>
               </div>
 
-              {/* ACTION FOOTER */}
-              <div className="pt-4 flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+              {/* TOMBOL: SALIN LINK, SALIN PIN, MULAI GAME, TUTUP */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto pt-2">
                 <button
                   type="button"
-                  onClick={() => onGameCreated(createdRoom)}
-                  className="w-full py-3.5 px-6 bg-[#C1F2D0] hover:bg-emerald-300 text-gray-900 border-2 border-gray-900 rounded-xl font-black text-sm uppercase tracking-wider cursor-pointer shadow-[3px_3px_0_rgba(0,0,0,1)] flex items-center justify-center gap-2"
+                  onClick={handleCopyLink}
+                  className="py-3 px-4 bg-white hover:bg-gray-50 border-2 border-gray-900 rounded-xl font-black text-xs uppercase cursor-pointer shadow-[2px_2px_0_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-2"
+                  id="btn-salin-link"
                 >
-                  <span>BUKA LOBBY GURU</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {copiedLink ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedLink ? 'LINK TERSALIN!' : 'SALIN LINK'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyPin}
+                  className="py-3 px-4 bg-white hover:bg-gray-50 border-2 border-gray-900 rounded-xl font-black text-xs uppercase cursor-pointer shadow-[2px_2px_0_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-2"
+                  id="btn-salin-pin"
+                >
+                  {copiedPin ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedPin ? 'PIN TERSALIN!' : 'SALIN PIN'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleStartGame}
+                  className="py-3.5 px-6 bg-[#C1F2D0] hover:bg-emerald-300 text-gray-900 border-2 border-gray-900 rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer shadow-[2px_2px_0_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-2"
+                  id="btn-mulai-game"
+                >
+                  <Play className="w-4 h-4 fill-gray-900" />
+                  <span>MULAI GAME</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="py-3.5 px-6 bg-gray-100 hover:bg-gray-200 text-gray-900 border-2 border-gray-900 rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer shadow-[2px_2px_0_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-2"
+                  id="btn-tutup-modal"
+                >
+                  <span>TUTUP</span>
                 </button>
               </div>
             </div>
