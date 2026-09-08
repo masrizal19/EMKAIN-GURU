@@ -130,16 +130,28 @@ export const ColorStudentGameJoin: React.FC<ColorStudentGameJoinProps> = ({
     }
 
     try {
-      // 1. Coba join via RPC join_color_game terlebih dahulu
+      // 1. Coba join via RPC join_color_game
       let gameData: any = null;
       let newPart: any = null;
       let roundData: any = null;
 
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('join_color_game', {
+      let { data: rpcData, error: rpcErr } = await supabase.rpc('join_color_game', {
         p_room_code: cleanCode,
         p_pin: cleanPin,
-        p_participant_name: cleanName
+        p_name: cleanName
       });
+
+      if (rpcErr) {
+        const retryRpc = await supabase.rpc('join_color_game', {
+          p_room_code: cleanCode,
+          p_pin: cleanPin,
+          p_participant_name: cleanName
+        });
+        if (!retryRpc.error) {
+          rpcData = retryRpc.data;
+          rpcErr = null;
+        }
+      }
 
       if (!rpcErr && rpcData) {
         gameData = rpcData.game || rpcData;
