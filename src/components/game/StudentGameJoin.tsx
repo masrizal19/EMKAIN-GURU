@@ -193,7 +193,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
         // Reset user choice when question advances or status changes to playing
         if (newOrder !== prevOrder || (newStatus === 'playing' && prevStatus !== 'playing')) {
-          console.log('[GAME QUESTION] changed', newOrder);
+          console.log('[GAME QUESTION CHANGED]', newOrder);
           setSelectedOption(null);
           setIsLocked(false);
           setAnswerResult(null);
@@ -201,7 +201,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           // Server-synced countdown calculation
           const remaining = calculateRemainingTime(gData.question_started_at, gData.time_per_question || 20);
           setSecondsLeft(remaining);
-          console.log('[GAME TIMER] synced', remaining);
+          console.log('[GAME TIMER SYNC]', remaining);
         }
       }
 
@@ -243,6 +243,21 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
         const parsed = JSON.parse(saved);
         if (parsed.gameId && parsed.participantId && parsed.sessionToken) {
           loadGameState(parsed.gameId, parsed.participantId, parsed.sessionToken);
+
+          // Section 20: Test select on restore
+          (async () => {
+            try {
+              const { data: testData, error: testErr } = await supabase
+                .from('game_public_state')
+                .select('*')
+                .eq('game_id', parsed.gameId)
+                .maybeSingle();
+
+              console.log('[GAME PUBLIC STATE TEST]', { data: testData, error: testErr });
+            } catch (e) {
+              console.error('[GAME PUBLIC STATE TEST EXCEPTION]', e);
+            }
+          })();
         }
       } catch (e) {
         console.error('[RESTORE GAME SESSION ERROR]', e);
@@ -250,7 +265,63 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     }
   }, [initialRoomCode]);
 
-  // Single Supabase Realtime subscription via postgres_changes
+  // Handle Realtime Game State updates from game_public_state
+  const handleRealtimeGameState = async (state: any, targetGameId: string, targetPartId: string, targetToken: string) => {
+    console.log('[GAME PUBLIC STATE CHANGED]', state);
+    if (!state) return;
+
+    const incomingStatus = state.status;
+    const incomingOrder = state.current_question_order;
+
+    if (incomingStatus === 'closed') {
+      setRoom((prev) => (prev ? { ...prev, status: 'closed' } : null));
+      return;
+    }
+
+    if (incomingStatus === 'finished') {
+      console.log('[GAME REALTIME] GAME FINISHED');
+      setRoom((prev) => (prev ? { ...prev, status: 'finished' } : null));
+      await loadGameState(targetGameId, targetPartId, targetToken);
+      await loadLeaderboard(targetGameId);
+      return;
+    }
+
+    const prevOrder = lastKnownOrderRef.current;
+    const prevStatus = lastKnownStatusRef.current;
+
+    const isOrderChanged = incomingOrder !== undefined && incomingOrder !== prevOrder;
+    const isStatusChanged = incomingStatus !== prevStatus;
+    const needsActiveQuestion = incomingStatus === 'playing' && !activeQuestionRef.current;
+
+    if (isOrderChanged) {
+      console.log('[GAME QUESTION CHANGED]', incomingOrder);
+    }
+
+    // Update room state from public state
+    setRoom((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        status: incomingStatus || prev.status,
+        current_question_index: incomingOrder !== undefined ? Math.max(0, incomingOrder - 1) : prev.current_question_index,
+        time_per_question: state.time_per_question || prev.time_per_question,
+        question_count: state.question_count || prev.question_count,
+        question_start_time: state.question_started_at || prev.question_start_time
+      };
+    });
+
+    if (state.question_started_at) {
+      const remaining = calculateRemainingTime(state.question_started_at, state.time_per_question || 20);
+      setSecondsLeft(remaining);
+      console.log('[GAME TIMER SYNC]', remaining);
+    }
+
+    if (isStatusChanged || isOrderChanged || needsActiveQuestion) {
+      await loadGameState(targetGameId, targetPartId, targetToken);
+    }
+  };
+
+  // Single Supabase Realtime subscription via postgres_changes on public.game_public_state
   useEffect(() => {
     const targetGameId = room?.id;
     const targetPartId = participant?.id;
@@ -258,11 +329,27 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
     if (!targetGameId || !targetPartId || !targetToken) return;
 
-    console.log('[GAME REALTIME] subscribing for game', targetGameId);
+    const channelName = `game-public-state-${targetGameId}`;
+    console.log('[GAME PUBLIC REALTIME] subscribing on channel', channelName);
 
-    const channel = supabase.channel(`game-realtime-${targetGameId}`);
+    const channel = supabase.channel(channelName);
 
     channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'game_public_state',
+          filter: `game_id=eq.${targetGameId}`
+        },
+        async (payload: any) => {
+          console.log('[GAME PUBLIC REALTIME]', payload);
+          const state = (payload.new || payload.old) as any;
+          if (!state) return;
+          await handleRealtimeGameState(state, targetGameId, targetPartId, targetToken);
+        }
+      )
       .on(
         'postgres_changes',
         {
@@ -271,14 +358,14 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           table: 'game_rooms',
           filter: `id=eq.${targetGameId}`
         },
-        (payload: any) => {
-          console.log('[GAME REALTIME] GAME ROOM UPDATE', payload);
+        async (payload: any) => {
+          console.log('[GAME ROOM UPDATE]', payload);
           if (payload.new) {
             const updated = payload.new as any;
             if (updated.status === 'finished') {
               console.log('[GAME REALTIME] GAME FINISHED');
-              loadGameState(targetGameId, targetPartId, targetToken);
-              loadLeaderboard(targetGameId);
+              await loadGameState(targetGameId, targetPartId, targetToken);
+              await loadLeaderboard(targetGameId);
               return;
             }
 
@@ -294,11 +381,11 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
             const needsActiveQuestion = updated.status === 'playing' && !activeQuestionRef.current;
 
             if (isOrderChanged) {
-              console.log('[GAME REALTIME] QUESTION CHANGED', updated.current_question_order);
+              console.log('[GAME QUESTION CHANGED]', updated.current_question_order);
             }
 
             if (isStatusChanged || isOrderChanged || needsActiveQuestion) {
-              loadGameState(targetGameId, targetPartId, targetToken);
+              await loadGameState(targetGameId, targetPartId, targetToken);
             }
           }
         }
@@ -312,11 +399,11 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           filter: `game_id=eq.${targetGameId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] PARTICIPANT UPDATE', payload);
+          console.log('[GAME PARTICIPANT CHANGED]', payload);
           if (payload.new) {
             const updated = payload.new as any;
             if (updated.id === targetPartId) {
-              console.log('[GAME REALTIME] SCORE CHANGED', updated.total_score);
+              console.log('[GAME SCORE CHANGED]', updated.total_score);
               setParticipant((prev) =>
                 prev
                   ? {
@@ -343,24 +430,20 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           filter: `game_id=eq.${targetGameId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] ANSWER UPDATE', payload);
+          console.log('[GAME LEADERBOARD CHANGED]', payload);
           loadLeaderboard(targetGameId);
         }
       )
       .subscribe((status, err) => {
-        console.log('[GAME REALTIME]', status, targetGameId);
+        console.log('[GAME PUBLIC REALTIME STATUS]', status);
         if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] SUBSCRIBED');
           setIsRealtimeConnected(true);
         } else if (status === 'CHANNEL_ERROR') {
-          console.log('[GAME REALTIME] CHANNEL_ERROR');
-          if (err) console.error('[GAME REALTIME] channel error details', err);
+          if (err) console.error('[GAME PUBLIC REALTIME] channel error details', err);
           setIsRealtimeConnected(false);
         } else if (status === 'TIMED_OUT') {
-          console.log('[GAME REALTIME] TIMED_OUT');
           setIsRealtimeConnected(false);
         } else if (status === 'CLOSED') {
-          console.log('[GAME REALTIME] CLOSED');
           setIsRealtimeConnected(false);
         }
       });
@@ -371,7 +454,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     };
   }, [room?.id, participant?.id, participant?.session_token]);
 
-  // Fallback polling: active when realtime disconnected or when waiting
+  // Fallback polling: ONLY active if realtime is disconnected (CHANNEL_ERROR, TIMED_OUT, CLOSED)
   useEffect(() => {
     const targetGameId = room?.id;
     const targetPartId = participant?.id;
@@ -381,9 +464,11 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     if (!targetGameId || !targetPartId || !targetToken) return;
     if (currentStatus !== 'waiting' && currentStatus !== 'playing') return;
 
+    // Strict requirement: stop polling when realtime is connected
+    if (isRealtimeConnected) return;
+
     const interval = setInterval(async () => {
-      // If realtime is healthy and already playing, no need to poll
-      if (isRealtimeConnected && currentStatus === 'playing') return;
+      if (isRealtimeConnected) return;
 
       try {
         const { data: rData } = await supabase
@@ -404,7 +489,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
       } catch {
         // silent
       }
-    }, 1500);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [room?.id, room?.status, participant?.id, participant?.session_token, isRealtimeConnected]);
@@ -535,6 +620,19 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
       // Immediately fetch latest game state
       await loadGameState(gameData.id, participantData.id, effectiveToken);
+
+      // Section 20: Test select game_public_state
+      try {
+        const { data: testData, error: testErr } = await supabase
+          .from('game_public_state')
+          .select('*')
+          .eq('game_id', gameData.id)
+          .maybeSingle();
+
+        console.log('[GAME PUBLIC STATE TEST]', { data: testData, error: testErr });
+      } catch (testEx) {
+        console.error('[GAME PUBLIC STATE TEST EXCEPTION]', testEx);
+      }
 
     } catch (err: any) {
       console.error('[GAME JOIN ERROR]', err);

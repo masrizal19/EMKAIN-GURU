@@ -77,11 +77,13 @@ export const GameCenter: React.FC<GameCenterProps> = ({
   };
 
   useEffect(() => {
-    if (initialRoomCode) {
+    if (initialRoomCode !== undefined) {
       setStudentRoomCode(initialRoomCode);
+    }
+    if (isStudentJoinView || !!initialRoomCode) {
       setStudentMode(true);
     }
-  }, [initialRoomCode]);
+  }, [initialRoomCode, isStudentJoinView]);
 
   useEffect(() => {
     if (!studentMode && !activeTeacherRoomId) {

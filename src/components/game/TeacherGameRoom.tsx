@@ -164,11 +164,39 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     if (!room?.id) return;
     const gId = room.id;
 
-    console.log('[GAME REALTIME] subscribing for game', gId);
+    const channelName = `game-public-state-${gId}`;
+    console.log('[GAME PUBLIC REALTIME] (teacher) subscribing on channel', channelName);
 
-    const channel = supabase.channel(`game-realtime-${gId}`);
+    const channel = supabase.channel(channelName);
 
     channel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'game_public_state',
+          filter: `game_id=eq.${gId}`
+        },
+        (payload: any) => {
+          console.log('[GAME PUBLIC REALTIME] (teacher)', payload);
+          const state = (payload.new || payload.old) as any;
+          if (!state) return;
+          if (state.current_question_order !== undefined) {
+            console.log('[GAME QUESTION CHANGED]', state.current_question_order);
+          }
+          if (state.status === 'finished') {
+            console.log('[GAME REALTIME] GAME FINISHED');
+            fetchGameResultsApi(gId).then((resData) => {
+              if (resData.success && resData.results) {
+                setFinalResults(resData.results);
+              }
+            });
+            loadLeaderboard(gId);
+          }
+          loadRoomData();
+        }
+      )
       .on(
         'postgres_changes',
         {
@@ -178,7 +206,7 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
           filter: `id=eq.${gId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] GAME ROOM UPDATE', payload);
+          console.log('[GAME ROOM UPDATE] (teacher)', payload);
           if (payload.new) {
             const updated = payload.new;
             if (updated.status === 'finished') {
@@ -191,7 +219,7 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
               loadLeaderboard(gId);
             }
             if (updated.current_question_order !== undefined) {
-              console.log('[GAME REALTIME] QUESTION CHANGED', updated.current_question_order);
+              console.log('[GAME QUESTION CHANGED]', updated.current_question_order);
             }
             loadRoomData();
           }
@@ -206,7 +234,7 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
           filter: `game_id=eq.${gId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] PARTICIPANT UPDATE', payload);
+          console.log('[GAME PARTICIPANT CHANGED]', payload);
           loadParticipants(gId);
           loadLeaderboard(gId);
         }
@@ -220,21 +248,16 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
           filter: `game_id=eq.${gId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME] ANSWER UPDATE', payload);
+          console.log('[GAME LEADERBOARD CHANGED]', payload);
           loadLeaderboard(gId);
         }
       )
       .subscribe((status, err) => {
-        console.log('[GAME REALTIME]', status, gId);
+        console.log('[GAME PUBLIC REALTIME STATUS] (teacher)', status);
         if (status === 'SUBSCRIBED') {
-          console.log('[GAME REALTIME] SUBSCRIBED');
+          // Connected
         } else if (status === 'CHANNEL_ERROR') {
-          console.log('[GAME REALTIME] CHANNEL_ERROR');
-          if (err) console.error('[GAME REALTIME] channel error details', err);
-        } else if (status === 'TIMED_OUT') {
-          console.log('[GAME REALTIME] TIMED_OUT');
-        } else if (status === 'CLOSED') {
-          console.log('[GAME REALTIME] CLOSED');
+          if (err) console.error('[GAME PUBLIC REALTIME] (teacher) channel error details', err);
         }
       });
 
@@ -254,7 +277,7 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
 
     const initialRemaining = calculateRemainingTime(startTime, duration);
     setSecondsLeft(initialRemaining);
-    console.log('[GAME TIMER] synced (teacher)', initialRemaining);
+    console.log('[GAME TIMER SYNC]', initialRemaining);
 
     const tick = () => {
       const remaining = calculateRemainingTime(startTime, duration);
