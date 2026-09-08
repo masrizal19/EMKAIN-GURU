@@ -47,6 +47,15 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
   const pollTimerRef = useRef<any>(null);
   const countdownTimerRef = useRef<any>(null);
 
+  // Synchronized server-based timer formula
+  const calculateRemainingTime = (questionStartedAt?: string | null, duration: number = 20): number => {
+    if (!questionStartedAt) return duration;
+    const started = Date.parse(questionStartedAt);
+    if (isNaN(started)) return duration;
+    const elapsed = (Date.now() - started) / 1000;
+    return Math.max(0, Math.ceil(duration - elapsed));
+  };
+
   // Load initial data
   const loadRoomData = async () => {
     try {
@@ -65,10 +74,58 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     }
   };
 
+  // Load Participants Helper
+  const loadParticipants = async (gId: string) => {
+    try {
+      const { data: pData, error: pError } = await supabase
+        .from('game_participants')
+        .select('*')
+        .eq('game_id', gId)
+        .order('participant_number', { ascending: true });
+
+      if (!pError && pData) {
+        console.log('[GAME PARTICIPANT] changed', pData.length);
+        setParticipants(
+          pData.map((p: any) => ({
+            ...p,
+            participant_number: String(p.participant_number).padStart(2, '0')
+          }))
+        );
+      }
+    } catch (e) {
+      console.error('[LOAD PARTICIPANTS ERROR]', e);
+    }
+  };
+
+  // Load Leaderboard Helper
+  const loadLeaderboard = async (gId: string) => {
+    try {
+      const { data, error: lbErr } = await supabase.rpc('get_game_leaderboard', {
+        p_game_id: gId
+      });
+      if (!lbErr && data) {
+        console.log('[GAME LEADERBOARD] changed', data.length);
+        const formatted: GameParticipant[] = data.map((p: any) => ({
+          id: p.participant_id || p.id,
+          game_id: gId,
+          participant_name: p.participant_name,
+          participant_number: String(p.participant_number).padStart(2, '0'),
+          total_score: p.total_score || 0,
+          correct_count: p.correct_count || 0,
+          wrong_count: p.wrong_count || 0,
+          unanswered_count: 0
+        }));
+        setLeaderboard(formatted);
+      }
+    } catch (e) {
+      console.error('[LOAD LEADERBOARD ERROR]', e);
+    }
+  };
+
   useEffect(() => {
     loadRoomData();
 
-    // Auto poll lobby or question state
+    // Light auto poll fallback (1.5s) to guarantee updates if network drops
     pollTimerRef.current = setInterval(async () => {
       try {
         const res = await fetchGameRoomApi(roomIdOrCode, false);
@@ -77,7 +134,7 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
           if (res.participants) setParticipants(res.participants);
           if (res.questions) setQuestions(res.questions);
 
-          // If playing, update leaderboard
+          // If playing or finished, update leaderboard
           if (res.room.status === 'playing' || res.room.status === 'finished') {
             const lbRes = await fetchGameLeaderboardApi(res.room.id);
             if (lbRes.success && lbRes.leaderboard) {
@@ -94,7 +151,7 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
       } catch (e) {
         // silent poll error
       }
-    }, 2000);
+    }, 1500);
 
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
@@ -102,56 +159,142 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     };
   }, [roomIdOrCode]);
 
-  // Realtime subscription for participants joining the lobby
+  // Complete Realtime Subscriptions for Teacher (game-state, game-leaderboard, game-lobby, game-room)
   useEffect(() => {
     if (!room?.id) return;
+    const gId = room.id;
 
-    const channel = supabase
-      .channel(`teacher_room_participants_${room.id}`)
+    console.log('[GAME REALTIME] teacher subscribing for room', gId);
+
+    // 1. game-state:${gId}
+    const stateChannel = supabase
+      .channel(`game-state:${gId}`)
+      .on('broadcast', { event: 'game_state_changed' }, (payload: any) => {
+        console.log('[GAME REALTIME] event game_state_changed (teacher)', payload);
+        const state = payload?.payload || payload;
+        console.log('[GAME STATE] changed (teacher)', state);
+        loadRoomData();
+        loadLeaderboard(gId);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-state (teacher)', gId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-state (teacher)', err);
+        }
+      });
+
+    // 2. game-leaderboard:${gId}
+    const leaderboardChannel = supabase
+      .channel(`game-leaderboard:${gId}`)
+      .on('broadcast', { event: 'leaderboard_changed' }, (payload: any) => {
+        console.log('[GAME REALTIME] event leaderboard_changed (teacher)', payload);
+        console.log('[GAME LEADERBOARD] changed (teacher)', payload);
+        loadLeaderboard(gId);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-leaderboard (teacher)', gId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-leaderboard (teacher)', err);
+        }
+      });
+
+    // 3. game-lobby:${gId}
+    const lobbyChannel = supabase
+      .channel(`game-lobby:${gId}`)
+      .on('broadcast', { event: 'participant_count_changed' }, (payload: any) => {
+        console.log('[GAME REALTIME] event participant_count_changed (teacher)', payload);
+        console.log('[GAME PARTICIPANT] changed (teacher)', payload);
+        loadParticipants(gId);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-lobby (teacher)', gId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-lobby (teacher)', err);
+        }
+      });
+
+    // 4. game-room:${gId} (General channel for postgres_changes + broadcasts)
+    const roomChannel = supabase
+      .channel(`game-room:${gId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'game_rooms',
+          filter: `id=eq.${gId}`
+        },
+        (payload: any) => {
+          console.log('[GAME REALTIME] event game_rooms (teacher)', payload);
+          loadRoomData();
+        }
+      )
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'game_participants',
-          filter: `game_id=eq.${room.id}`
+          filter: `game_id=eq.${gId}`
         },
-        async () => {
-          try {
-            const { data: pData } = await supabase
-              .from('game_participants')
-              .select('*')
-              .eq('game_id', room.id)
-              .order('participant_number', { ascending: true });
-            if (pData) {
-              setParticipants(pData.map((p: any) => ({
-                ...p,
-                participant_number: String(p.participant_number).padStart(2, '0')
-              })));
-            }
-          } catch (e) {
-            console.error('[REALTIME PARTICIPANTS ERROR]', e);
-          }
+        (payload: any) => {
+          console.log('[GAME REALTIME] event game_participants (teacher)', payload);
+          loadParticipants(gId);
+          loadLeaderboard(gId);
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'game_answers',
+          filter: `game_id=eq.${gId}`
+        },
+        (payload: any) => {
+          console.log('[GAME REALTIME] event game_answers (teacher)', payload);
+          loadLeaderboard(gId);
+        }
+      )
+      .on('broadcast', { event: '*' }, (payload: any) => {
+        console.log('[GAME REALTIME] event broadcast (teacher)', payload);
+        loadRoomData();
+        loadLeaderboard(gId);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-room (teacher)', gId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-room (teacher)', err);
+        }
+      });
 
     return () => {
-      supabase.removeChannel(channel);
+      console.log('[GAME REALTIME] cleaning up teacher channels for', gId);
+      supabase.removeChannel(stateChannel);
+      supabase.removeChannel(leaderboardChannel);
+      supabase.removeChannel(lobbyChannel);
+      supabase.removeChannel(roomChannel);
     };
   }, [room?.id]);
 
-  // Question Timer Loop
+  // Question Timer Loop (server-synced)
   useEffect(() => {
     if (!room || room.status !== 'playing' || !room.question_start_time) return;
 
     setShowQuestionResult(false);
-    const startMs = new Date(room.question_start_time).getTime();
-    const durationSec = room.time_per_question || 20;
+    const duration = room.time_per_question || 20;
+    const startTime = room.question_start_time;
+
+    const initialRemaining = calculateRemainingTime(startTime, duration);
+    setSecondsLeft(initialRemaining);
+    console.log('[GAME TIMER] synced (teacher)', initialRemaining);
 
     const tick = () => {
-      const elapsed = Math.floor((Date.now() - startMs) / 1000);
-      const remaining = Math.max(0, durationSec - elapsed);
+      const remaining = calculateRemainingTime(startTime, duration);
       setSecondsLeft(remaining);
 
       if (remaining === 0) {
@@ -159,64 +302,63 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
       }
     };
 
-    tick();
-    const timer = setInterval(tick, 1000);
+    const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
-  }, [room?.status, room?.current_question_index, room?.question_start_time, room?.time_per_question]);
+  }, [room?.status, room?.question_start_time, room?.time_per_question]);
 
-  // Start game handler
+  // Start game handler via direct RPC
   const handleStartGame = async () => {
     if (!room) return;
     try {
-      const res = await startGameRoomApi(room.id);
-      if (res.success && res.room) {
-        setRoom((prev) => prev ? {
-          ...prev,
-          status: 'playing',
-          current_question_index: 0,
-          question_start_time: res.room.question_started_at || new Date().toISOString()
-        } : prev);
-        setShowQuestionResult(false);
-      } else {
-        alert(res.error || 'Gagal memulai game');
+      console.log('[GAME START] invoking rpc start_game for', room.id);
+      const { data, error } = await supabase.rpc('start_game', {
+        p_game_id: room.id
+      });
+
+      if (error) {
+        console.error('[GAME START ERROR]', error);
+        alert(error.message || 'Gagal memulai game');
+        return;
       }
+
+      console.log('[GAME STATE] changed to playing', data);
+      await loadRoomData();
+      setShowQuestionResult(false);
     } catch (err: any) {
-      alert(err.message || 'Gagal memulai game');
+      console.error('[GAME ERROR]', err);
+      alert(err?.message || 'Gagal memulai game');
     }
   };
 
-  // Next question handler
+  // Next question handler via direct RPC
   const handleNextQuestion = async () => {
     if (!room) return;
     try {
-      const res = await nextQuestionApi(room.id);
-      if (res.success && res.room) {
-        const nextOrder = res.room.current_question_order !== undefined
-          ? Math.max(0, res.room.current_question_order - 1)
-          : (room.current_question_index + 1);
+      console.log('[GAME NEXT] invoking rpc next_game_question for', room.id);
+      const { data, error } = await supabase.rpc('next_game_question', {
+        p_game_id: room.id
+      });
 
-        setRoom((prev) => prev ? {
-          ...prev,
-          status: res.room.status,
-          current_question_index: nextOrder,
-          question_start_time: res.room.question_started_at || new Date().toISOString()
-        } : prev);
-        setShowQuestionResult(false);
-        if (res.room.status === 'finished') {
-          const resData = await fetchGameResultsApi(room.id);
-          if (resData.success && resData.results) {
-            setFinalResults(resData.results);
-          }
-          const lbRes = await fetchGameLeaderboardApi(room.id);
-          if (lbRes.success && lbRes.leaderboard) {
-            setLeaderboard(lbRes.leaderboard);
-          }
+      if (error) {
+        console.error('[GAME NEXT ERROR]', error);
+        alert(error.message || 'Gagal lanjut soal');
+        return;
+      }
+
+      console.log('[GAME QUESTION] changed', data);
+      await loadRoomData();
+      setShowQuestionResult(false);
+
+      if (data?.status === 'finished' || room.status === 'finished') {
+        const resData = await fetchGameResultsApi(room.id);
+        if (resData.success && resData.results) {
+          setFinalResults(resData.results);
         }
-      } else {
-        alert(res.error || 'Gagal lanjut soal');
+        await loadLeaderboard(room.id);
       }
     } catch (err: any) {
-      alert(err.message || 'Gagal lanjut soal');
+      console.error('[GAME ERROR]', err);
+      alert(err?.message || 'Gagal lanjut soal');
     }
   };
 

@@ -55,7 +55,30 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
   const lastKnownOrderRef = useRef<number>(0);
   const lastKnownStatusRef = useRef<string>('waiting');
-  const questionStartTimeRef = useRef<number>(Date.now());
+  const activeQuestionRef = useRef<GameQuestion | null>(null);
+  const roomRef = useRef<GameRoom | null>(null);
+  const participantRef = useRef<GameParticipant | null>(null);
+
+  useEffect(() => {
+    activeQuestionRef.current = activeQuestion;
+  }, [activeQuestion]);
+
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    participantRef.current = participant;
+  }, [participant]);
+
+  // Synchronized server-based timer formula
+  const calculateRemainingTime = (questionStartedAt?: string | null, duration: number = 20): number => {
+    if (!questionStartedAt) return duration;
+    const started = Date.parse(questionStartedAt);
+    if (isNaN(started)) return duration;
+    const elapsed = (Date.now() - started) / 1000;
+    return Math.max(0, Math.ceil(duration - elapsed));
+  };
 
   // Populate room code from URL parameter or prop without auto-joining
   useEffect(() => {
@@ -75,8 +98,9 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
         return;
       }
       if (data) {
+        console.log('[GAME LEADERBOARD] changed', data.length);
         const formattedLb: GameParticipant[] = data.map((p: any) => ({
-          id: p.participant_id,
+          id: p.participant_id || p.id,
           game_id: gId,
           participant_name: p.participant_name,
           participant_number: String(p.participant_number).padStart(2, '0'),
@@ -86,6 +110,20 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           unanswered_count: 0
         }));
         setLeaderboard(formattedLb);
+
+        // Keep local participant score in sync with database leaderboard
+        const myId = participantRef.current?.id;
+        if (myId) {
+          const me = formattedLb.find(p => p.id === myId);
+          if (me) {
+            setParticipant(prev => prev ? {
+              ...prev,
+              total_score: me.total_score,
+              correct_count: me.correct_count,
+              wrong_count: me.wrong_count
+            } : null);
+          }
+        }
       }
     } catch (err) {
       console.error('[GAME LEADERBOARD ERROR]', err);
@@ -94,9 +132,9 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
   // Central loadGameState function calling get_game_state RPC
   const loadGameState = async (targetGameId?: string, targetPartId?: string, targetToken?: string) => {
-    const gId = targetGameId || room?.id;
-    const pId = targetPartId || participant?.id;
-    const sToken = targetToken || participant?.session_token;
+    const gId = targetGameId || roomRef.current?.id || room?.id;
+    const pId = targetPartId || participantRef.current?.id || participant?.id;
+    const sToken = targetToken || participantRef.current?.session_token || participant?.session_token;
 
     if (!gId || !pId || !sToken) return;
 
@@ -109,11 +147,12 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
       if (stateErr) {
         console.error('[GAME STATE ERROR]', stateErr);
-        setError(stateErr.message);
+        setError(stateErr.message || 'Gagal memuat state game');
         return;
       }
 
       if (!data || !data.success) {
+        console.error('[GAME STATE INVALID]', data);
         return;
       }
 
@@ -130,28 +169,39 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
         lastKnownOrderRef.current = newOrder;
         lastKnownStatusRef.current = newStatus;
 
+        console.log('[GAME STATE] changed', {
+          status: newStatus,
+          order: newOrder,
+          question_started_at: gData.question_started_at
+        });
+
         setRoom((prev) => ({
           id: gData.id,
-          title: gData.title,
-          subject: gData.subject,
-          class_level: gData.class_name || '',
-          class_name: gData.class_name || '',
-          pin: prev?.pin || '',
-          room_code: gData.room_code,
+          title: gData.title || prev?.title || 'Game Kuis',
+          subject: gData.subject || prev?.subject || '',
+          class_level: gData.class_name || prev?.class_level || '',
+          class_name: gData.class_name || prev?.class_name || '',
+          pin: prev?.pin || String(gData.pin || ''),
+          room_code: gData.room_code || prev?.room_code || '',
           status: newStatus,
           current_question_index: Math.max(0, newOrder - 1),
-          question_count: gData.question_count || 0,
-          time_per_question: gData.time_per_question || 20,
+          question_count: gData.question_count || prev?.question_count || 0,
+          time_per_question: gData.time_per_question || prev?.time_per_question || 20,
           question_start_time: gData.question_started_at || null,
           created_at: prev?.created_at || new Date().toISOString()
         }));
 
-        // Reset user choice when new question starts or status changes
-        if (newOrder !== prevOrder || newStatus !== prevStatus) {
+        // Reset user choice when question advances or status changes to playing
+        if (newOrder !== prevOrder || (newStatus === 'playing' && prevStatus !== 'playing')) {
+          console.log('[GAME QUESTION] changed', newOrder);
           setSelectedOption(null);
           setIsLocked(false);
           setAnswerResult(null);
-          questionStartTimeRef.current = Date.now();
+
+          // Server-synced countdown calculation
+          const remaining = calculateRemainingTime(gData.question_started_at, gData.time_per_question || 20);
+          setSecondsLeft(remaining);
+          console.log('[GAME TIMER] synced', remaining);
         }
       }
 
@@ -198,31 +248,105 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     }
   }, [initialRoomCode]);
 
-  // Supabase Realtime subscription specifically for this game room
+  // Complete Supabase Realtime subscriptions (game-state, game-leaderboard, game-lobby, game-room)
   useEffect(() => {
-    if (!room?.id || !participant?.id || !participant?.session_token) return;
+    const targetGameId = room?.id;
+    const targetPartId = participant?.id;
+    const targetToken = participant?.session_token;
 
-    const channel = supabase
-      .channel(`game_room_student_${room.id}`)
+    if (!targetGameId || !targetPartId || !targetToken) return;
+
+    console.log('[GAME REALTIME] subscribing for game', targetGameId);
+
+    // 1. game-state:${targetGameId} (Broadcast)
+    const stateChannel = supabase
+      .channel(`game-state:${targetGameId}`)
+      .on('broadcast', { event: 'game_state_changed' }, (payload: any) => {
+        console.log('[GAME REALTIME] event game_state_changed', payload);
+        const state = payload?.payload || payload;
+        console.log('[GAME STATE] changed', state);
+
+        if (state) {
+          const incomingOrder = state.current_question_order;
+          const incomingStatus = state.status;
+
+          if (incomingStatus === 'finished') {
+            loadGameState(targetGameId, targetPartId, targetToken);
+            loadLeaderboard(targetGameId);
+            return;
+          }
+
+          if (
+            incomingStatus !== lastKnownStatusRef.current ||
+            (incomingOrder !== undefined && incomingOrder !== lastKnownOrderRef.current) ||
+            (incomingStatus === 'playing' && !activeQuestionRef.current)
+          ) {
+            loadGameState(targetGameId, targetPartId, targetToken);
+          }
+        } else {
+          loadGameState(targetGameId, targetPartId, targetToken);
+        }
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-state', targetGameId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-state', err);
+        }
+      });
+
+    // 2. game-leaderboard:${targetGameId} (Broadcast)
+    const leaderboardChannel = supabase
+      .channel(`game-leaderboard:${targetGameId}`)
+      .on('broadcast', { event: 'leaderboard_changed' }, (payload: any) => {
+        console.log('[GAME REALTIME] event leaderboard_changed', payload);
+        console.log('[GAME LEADERBOARD] changed', payload);
+        loadLeaderboard(targetGameId);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-leaderboard', targetGameId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-leaderboard', err);
+        }
+      });
+
+    // 3. game-lobby:${targetGameId} (Broadcast)
+    const lobbyChannel = supabase
+      .channel(`game-lobby:${targetGameId}`)
+      .on('broadcast', { event: 'participant_count_changed' }, (payload: any) => {
+        console.log('[GAME REALTIME] event participant_count_changed', payload);
+        console.log('[GAME PARTICIPANT] changed', payload);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-lobby', targetGameId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-lobby', err);
+        }
+      });
+
+    // 4. game-room:${targetGameId} (General Room Channel: postgres_changes + broadcasts)
+    const roomChannel = supabase
+      .channel(`game-room:${targetGameId}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'game_rooms',
-          filter: `id=eq.${room.id}`
+          filter: `id=eq.${targetGameId}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME ROOM UPDATE]', payload);
+          console.log('[GAME REALTIME] event game_rooms postgres_changes', payload);
           if (payload.new) {
             const updated = payload.new;
             if (
-              updated.status === 'playing' ||
-              updated.status === 'finished' ||
+              updated.status !== lastKnownStatusRef.current ||
               (updated.current_question_order !== undefined && updated.current_question_order !== lastKnownOrderRef.current) ||
-              updated.status !== lastKnownStatusRef.current
+              (updated.status === 'playing' && !activeQuestionRef.current)
             ) {
-              loadGameState(room.id, participant.id, participant.session_token);
+              loadGameState(targetGameId, targetPartId, targetToken);
             }
           }
         }
@@ -233,9 +357,10 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           event: '*',
           schema: 'public',
           table: 'game_participants',
-          filter: `id=eq.${participant.id}`
+          filter: `id=eq.${targetPartId}`
         },
         (payload: any) => {
+          console.log('[GAME REALTIME] event my participant postgres_changes', payload);
           if (payload.new) {
             const updated = payload.new;
             setParticipant((prev) =>
@@ -252,33 +377,71 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           }
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'game_answers',
+          filter: `game_id=eq.${targetGameId}`
+        },
+        (payload: any) => {
+          console.log('[GAME REALTIME] event game_answers postgres_changes', payload);
+          loadLeaderboard(targetGameId);
+        }
+      )
+      .on('broadcast', { event: '*' }, (payload: any) => {
+        console.log('[GAME REALTIME] event room broadcast', payload);
+        loadGameState(targetGameId, targetPartId, targetToken);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[GAME REALTIME] connected game-room', targetGameId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[GAME REALTIME] channel error game-room', err);
+        }
+      });
 
     return () => {
-      supabase.removeChannel(channel);
+      console.log('[GAME REALTIME] cleaning up channels for', targetGameId);
+      supabase.removeChannel(stateChannel);
+      supabase.removeChannel(leaderboardChannel);
+      supabase.removeChannel(lobbyChannel);
+      supabase.removeChannel(roomChannel);
     };
   }, [room?.id, participant?.id, participant?.session_token]);
 
-  // Fallback polling: if status is 'waiting', check state every 1 second
+  // Fallback polling: if status is 'waiting' or 'playing', check room state lightly every 1.5s
   useEffect(() => {
-    if (!room?.id || !participant?.id || room.status !== 'waiting') return;
+    const targetGameId = room?.id;
+    const targetPartId = participant?.id;
+    const targetToken = participant?.session_token;
+    const currentStatus = room?.status;
+
+    if (!targetGameId || !targetPartId || !targetToken) return;
+    if (currentStatus !== 'waiting' && currentStatus !== 'playing') return;
 
     const interval = setInterval(async () => {
       try {
         const { data: rData } = await supabase
           .from('game_rooms')
           .select('status, current_question_order')
-          .eq('id', room.id)
+          .eq('id', targetGameId)
           .maybeSingle();
 
-        if (rData && (rData.status === 'playing' || rData.status === 'finished')) {
-          clearInterval(interval);
-          loadGameState(room.id, participant.id, participant.session_token);
+        if (rData) {
+          if (
+            rData.status !== lastKnownStatusRef.current ||
+            (rData.current_question_order !== undefined && rData.current_question_order !== lastKnownOrderRef.current) ||
+            (rData.status === 'playing' && !activeQuestionRef.current)
+          ) {
+            loadGameState(targetGameId, targetPartId, targetToken);
+          }
         }
       } catch {
         // silent
       }
-    }, 1000);
+    }, 1500);
 
     return () => clearInterval(interval);
   }, [room?.id, room?.status, participant?.id, participant?.session_token]);
@@ -288,6 +451,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     if (!room?.id || !participant?.id) return;
     if (room.status !== 'playing' && room.status !== 'finished') return;
 
+    loadLeaderboard(room.id);
     const interval = setInterval(() => {
       loadLeaderboard(room.id);
     }, 3000);
@@ -299,19 +463,22 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
   useEffect(() => {
     if (!room || room.status !== 'playing' || !room.question_start_time) return;
 
-    const startMs = new Date(room.question_start_time).getTime();
-    const durationSec = room.time_per_question || 20;
+    const duration = room.time_per_question || 20;
+    const startTime = room.question_start_time;
+
+    // Immediate calculation
+    const initialRemaining = calculateRemainingTime(startTime, duration);
+    setSecondsLeft(initialRemaining);
+    console.log('[GAME TIMER] synced', initialRemaining);
 
     const tick = () => {
-      const elapsed = Math.floor((Date.now() - startMs) / 1000);
-      const remaining = Math.max(0, durationSec - elapsed);
+      const remaining = calculateRemainingTime(startTime, duration);
       setSecondsLeft(remaining);
     };
 
-    tick();
-    const timer = setInterval(tick, 1000);
+    const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
-  }, [room?.status, room?.current_question_index, room?.question_start_time, room?.time_per_question]);
+  }, [room?.status, room?.question_start_time, room?.time_per_question]);
 
   // Join Room Handler via Supabase RPC
   const handleJoin = async (e: React.FormEvent) => {
@@ -431,7 +598,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
       if (rpcError) {
         console.error('[GAME RPC ERROR]', rpcError);
-        setError(rpcError.message);
+        setError(rpcError.message || 'Gagal mengirim jawaban');
         return;
       }
 
@@ -447,6 +614,9 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
             prev ? { ...prev, total_score: (prev.total_score || 0) + data.score } : null
           );
         }
+
+        // Immediately update leaderboard after submitting answer
+        loadLeaderboard(room.id);
       }
     } catch (err: any) {
       console.error('[GAME ERROR]', err);
