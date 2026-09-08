@@ -8,6 +8,7 @@ import {
   ArrowLeft, Copy, Share2, Play, Users, Trophy, Award, 
   ChevronRight, CheckCircle2, Clock, XCircle, RotateCcw, AlertTriangle, BarChart3
 } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 import { 
   fetchGameRoomApi, 
   startGameRoomApi, 
@@ -101,6 +102,45 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     };
   }, [roomIdOrCode]);
 
+  // Realtime subscription for participants joining the lobby
+  useEffect(() => {
+    if (!room?.id) return;
+
+    const channel = supabase
+      .channel(`teacher_room_participants_${room.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'game_participants',
+          filter: `game_id=eq.${room.id}`
+        },
+        async () => {
+          try {
+            const { data: pData } = await supabase
+              .from('game_participants')
+              .select('*')
+              .eq('game_id', room.id)
+              .order('participant_number', { ascending: true });
+            if (pData) {
+              setParticipants(pData.map((p: any) => ({
+                ...p,
+                participant_number: String(p.participant_number).padStart(2, '0')
+              })));
+            }
+          } catch (e) {
+            console.error('[REALTIME PARTICIPANTS ERROR]', e);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [room?.id]);
+
   // Question Timer Loop
   useEffect(() => {
     if (!room || room.status !== 'playing' || !room.question_start_time) return;
@@ -130,8 +170,15 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     try {
       const res = await startGameRoomApi(room.id);
       if (res.success && res.room) {
-        setRoom(res.room);
+        setRoom((prev) => prev ? {
+          ...prev,
+          status: 'playing',
+          current_question_index: 0,
+          question_start_time: res.room.question_started_at || new Date().toISOString()
+        } : prev);
         setShowQuestionResult(false);
+      } else {
+        alert(res.error || 'Gagal memulai game');
       }
     } catch (err: any) {
       alert(err.message || 'Gagal memulai game');
@@ -144,14 +191,29 @@ export const TeacherGameRoom: React.FC<TeacherGameRoomProps> = ({
     try {
       const res = await nextQuestionApi(room.id);
       if (res.success && res.room) {
-        setRoom(res.room);
+        const nextOrder = res.room.current_question_order !== undefined
+          ? Math.max(0, res.room.current_question_order - 1)
+          : (room.current_question_index + 1);
+
+        setRoom((prev) => prev ? {
+          ...prev,
+          status: res.room.status,
+          current_question_index: nextOrder,
+          question_start_time: res.room.question_started_at || new Date().toISOString()
+        } : prev);
         setShowQuestionResult(false);
         if (res.room.status === 'finished') {
-          const resData = await fetchGameResultsApi(res.room.id);
+          const resData = await fetchGameResultsApi(room.id);
           if (resData.success && resData.results) {
             setFinalResults(resData.results);
           }
+          const lbRes = await fetchGameLeaderboardApi(room.id);
+          if (lbRes.success && lbRes.leaderboard) {
+            setLeaderboard(lbRes.leaderboard);
+          }
         }
+      } else {
+        alert(res.error || 'Gagal lanjut soal');
       }
     } catch (err: any) {
       alert(err.message || 'Gagal lanjut soal');

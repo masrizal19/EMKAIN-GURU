@@ -196,12 +196,89 @@ export async function fetchGameRoomApi(
   error?: string;
 }> {
   try {
-    const res = await fetch(
-      getApiUrl(`/api/game/room/${encodeURIComponent(codeOrId)}?asParticipant=${asParticipant}`)
-    );
-    return await res.json();
+    const cleanIdOrCode = codeOrId.trim();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanIdOrCode);
+
+    let query = supabase.from('game_rooms').select('*');
+    if (isUuid) {
+      query = query.eq('id', cleanIdOrCode);
+    } else {
+      query = query.eq('room_code', cleanIdOrCode.toUpperCase());
+    }
+
+    const { data: roomData, error: roomError } = await query.maybeSingle();
+
+    if (roomError) {
+      console.error('[GAME ROOM FETCH ERROR]', roomError);
+      return { success: false, error: roomError.message };
+    }
+
+    if (!roomData) {
+      return { success: false, error: 'Room game tidak ditemukan' };
+    }
+
+    const normalizedRoom: GameRoom = {
+      id: roomData.id,
+      title: roomData.title,
+      subject: roomData.subject,
+      class_level: roomData.class_name || roomData.class_level || '',
+      class_name: roomData.class_name || roomData.class_level || '',
+      pin: String(roomData.pin),
+      room_code: String(roomData.room_code),
+      status: (roomData.status as any) || 'waiting',
+      current_question_index: roomData.current_question_order !== undefined
+        ? Math.max(0, roomData.current_question_order - 1)
+        : (roomData.current_question_index || 0),
+      question_start_time: roomData.question_started_at || roomData.question_start_time || null,
+      question_count: roomData.question_count || 0,
+      time_per_question: roomData.time_per_question || 20,
+      creator_id: roomData.creator_id,
+      created_at: roomData.created_at || new Date().toISOString()
+    };
+
+    // Load questions
+    let questions: GameQuestion[] = [];
+    try {
+      const { data: qData } = await supabase
+        .from('game_questions')
+        .select('*')
+        .eq('game_id', roomData.id)
+        .order('question_order', { ascending: true });
+      if (qData) {
+        questions = qData as GameQuestion[];
+      }
+    } catch (e) {
+      console.error('[LOAD QUESTIONS ERROR]', e);
+    }
+
+    // Load participants
+    let participants: GameParticipant[] = [];
+    try {
+      const { data: pData } = await supabase
+        .from('game_participants')
+        .select('*')
+        .eq('game_id', roomData.id)
+        .order('participant_number', { ascending: true });
+      if (pData) {
+        participants = pData.map((p: any) => ({
+          ...p,
+          participant_number: String(p.participant_number).padStart(2, '0')
+        })) as GameParticipant[];
+      }
+    } catch (e) {
+      console.error('[LOAD PARTICIPANTS ERROR]', e);
+    }
+
+    return {
+      success: true,
+      room: normalizedRoom,
+      questions,
+      participants,
+      participant_count: participants.length
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal memuat room' };
+    console.error('[GAME FETCH ROOM ERROR]', err);
+    return { success: false, error: err?.message || 'Gagal memuat room' };
   }
 }
 
@@ -314,55 +391,85 @@ export async function joinGameRoomApi(payload: {
   }
 }
 
-export async function startGameRoomApi(roomId: string): Promise<{ success: boolean; room?: GameRoom; error?: string }> {
+export async function startGameRoomApi(roomId: string): Promise<{ success: boolean; room?: any; error?: string }> {
   try {
-    const res = await fetch(getApiUrl('/api/game/start'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId })
+    const { data, error } = await supabase.rpc('start_game', {
+      p_game_id: roomId
     });
-    return await res.json();
+
+    if (error) {
+      console.error('[GAME START ERROR]', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, room: data };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal memulai game' };
+    console.error('[GAME START ERROR]', err);
+    return { success: false, error: err?.message || 'Gagal memulai game' };
   }
 }
 
-export async function nextQuestionApi(roomId: string): Promise<{ success: boolean; room?: GameRoom; error?: string }> {
+export async function nextQuestionApi(roomId: string): Promise<{ success: boolean; room?: any; error?: string }> {
   try {
-    const res = await fetch(getApiUrl('/api/game/next'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId })
+    const { data, error } = await supabase.rpc('next_game_question', {
+      p_game_id: roomId
     });
-    return await res.json();
+
+    if (error) {
+      console.error('[GAME NEXT ERROR]', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, room: data };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal beralih ke soal berikutnya' };
+    console.error('[GAME NEXT ERROR]', err);
+    return { success: false, error: err?.message || 'Gagal beralih ke soal berikutnya' };
   }
 }
 
 export async function submitGameAnswerApi(payload: {
-  roomId: string;
+  roomId?: string;
+  gameId?: string;
   participantId: string;
-  questionIndex: number;
+  sessionToken?: string;
+  questionIndex?: number;
   answer: 'A' | 'B' | 'C' | 'D';
-  responseTimeMs: number;
+  responseTimeMs?: number;
 }): Promise<{
   success: boolean;
   is_correct?: boolean;
   score?: number;
+  response_time_ms?: number;
   correct_answer?: 'A' | 'B' | 'C' | 'D';
   message?: string;
   error?: string;
 }> {
   try {
-    const res = await fetch(getApiUrl('/api/game/answer'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    const gId = payload.gameId || payload.roomId;
+    const sToken = payload.sessionToken || '00000000-0000-0000-0000-000000000000';
+
+    const { data, error } = await supabase.rpc('submit_game_answer', {
+      p_game_id: gId,
+      p_participant_id: payload.participantId,
+      p_session_token: sToken,
+      p_answer: payload.answer
     });
-    return await res.json();
+
+    if (error) {
+      console.error('[GAME RPC ERROR]', error);
+      return { success: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      is_correct: data?.is_correct,
+      score: data?.score,
+      response_time_ms: data?.response_time_ms,
+      correct_answer: data?.correct_answer
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal mengirimkan jawaban' };
+    console.error('[GAME ERROR]', err);
+    return { success: false, error: err?.message || 'Terjadi kesalahan pada Game' };
   }
 }
 
@@ -375,10 +482,35 @@ export async function fetchGameLeaderboardApi(roomId: string): Promise<{
   error?: string;
 }> {
   try {
-    const res = await fetch(getApiUrl(`/api/game/leaderboard/${encodeURIComponent(roomId)}`));
-    return await res.json();
+    const { data, error } = await supabase.rpc('get_game_leaderboard', {
+      p_game_id: roomId
+    });
+
+    if (error) {
+      console.error('[GAME LEADERBOARD ERROR]', error);
+      return { success: false, error: error.message };
+    }
+
+    const formatted: GameParticipant[] = (data || []).map((p: any) => ({
+      id: p.participant_id,
+      game_id: roomId,
+      participant_name: p.participant_name,
+      participant_number: String(p.participant_number).padStart(2, '0'),
+      total_score: p.total_score || 0,
+      correct_count: p.correct_count || 0,
+      wrong_count: p.wrong_count || 0,
+      unanswered_count: 0
+    }));
+
+    return {
+      success: true,
+      leaderboard: formatted,
+      top3: formatted.slice(0, 3),
+      total_participants: formatted.length
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal memuat papan peringkat' };
+    console.error('[GAME LEADERBOARD ERROR]', err);
+    return { success: false, error: err?.message || 'Gagal memuat papan peringkat' };
   }
 }
 
@@ -396,22 +528,59 @@ export async function fetchGameResultsApi(roomId: string): Promise<{
   error?: string;
 }> {
   try {
-    const res = await fetch(getApiUrl(`/api/game/results/${encodeURIComponent(roomId)}`));
-    return await res.json();
+    const { data, error } = await supabase.rpc('get_game_leaderboard', {
+      p_game_id: roomId
+    });
+
+    if (error) {
+      console.error('[GAME RESULTS ERROR]', error);
+      return { success: false, error: error.message };
+    }
+
+    const formatted = (data || []).map((p: any) => ({
+      id: p.participant_id,
+      game_id: roomId,
+      participant_name: p.participant_name,
+      participant_number: String(p.participant_number).padStart(2, '0'),
+      total_score: p.total_score || 0,
+      correct_count: p.correct_count || 0,
+      wrong_count: p.wrong_count || 0,
+      unanswered_count: 0,
+      total_time_ms: 0
+    }));
+
+    return {
+      success: true,
+      results: formatted,
+      total_participants: formatted.length
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal memuat ringkasan hasil' };
+    console.error('[GAME RESULTS ERROR]', err);
+    return { success: false, error: err?.message || 'Gagal memuat ringkasan hasil' };
   }
 }
 
-export async function closeGameRoomApi(roomId: string): Promise<{ success: boolean; room?: GameRoom; error?: string }> {
+export async function closeGameRoomApi(roomId: string): Promise<{ success: boolean; room?: any; error?: string }> {
   try {
-    const res = await fetch(getApiUrl('/api/game/close'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId })
+    const { data, error } = await supabase.rpc('close_game_room', {
+      p_game_id: roomId
     });
-    return await res.json();
+
+    if (error) {
+      const { error: updErr } = await supabase
+        .from('game_rooms')
+        .update({ status: 'closed', finished_at: new Date().toISOString() })
+        .eq('id', roomId);
+      if (updErr) {
+        console.error('[GAME CLOSE ERROR]', updErr);
+        return { success: false, error: updErr.message };
+      }
+      return { success: true };
+    }
+
+    return { success: true, room: data };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal menutup room' };
+    console.error('[GAME CLOSE ERROR]', err);
+    return { success: false, error: err?.message || 'Gagal menutup room' };
   }
 }

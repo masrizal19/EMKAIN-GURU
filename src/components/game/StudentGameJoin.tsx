@@ -42,6 +42,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Active question state
+  const [activeQuestion, setActiveQuestion] = useState<GameQuestion | null>(null);
   const [selectedOption, setSelectedOption] = useState<'A' | 'B' | 'C' | 'D' | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   const [answerResult, setAnswerResult] = useState<{
@@ -52,7 +53,8 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
   const [secondsLeft, setSecondsLeft] = useState<number>(20);
   const [leaderboard, setLeaderboard] = useState<GameParticipant[]>([]);
 
-  const pollIntervalRef = useRef<any>(null);
+  const lastKnownOrderRef = useRef<number>(0);
+  const lastKnownStatusRef = useRef<string>('waiting');
   const questionStartTimeRef = useRef<number>(Date.now());
 
   // Populate room code from URL parameter or prop without auto-joining
@@ -62,42 +64,143 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     }
   }, [initialRoomCode]);
 
-  // Optional room preview directly from Supabase (without auto-joining)
-  useEffect(() => {
-    if (!roomCode || roomCode.trim().length < 4 || participant) return;
-    const fetchPreview = async () => {
-      try {
-        const { data: roomData } = await supabase
-          .from('game_rooms')
-          .select('id, title, subject, class_level, class_name, room_code, question_count')
-          .eq('room_code', roomCode.trim().toUpperCase())
-          .maybeSingle();
-
-        if (roomData && !participant) {
-          setRoom(prev => prev && prev.id === roomData.id ? prev : ({
-            id: roomData.id,
-            title: roomData.title,
-            subject: roomData.subject,
-            class_level: roomData.class_name || roomData.class_level || '',
-            class_name: roomData.class_name || roomData.class_level || '',
-            room_code: roomData.room_code,
-            pin: '',
-            status: 'waiting',
-            current_question_index: 0,
-            question_count: roomData.question_count || 0,
-            time_per_question: 20
-          } as GameRoom));
-        }
-      } catch {
-        // silent preview catch
+  // Load Leaderboard helper
+  const loadLeaderboard = async (gId: string) => {
+    try {
+      const { data, error: lbErr } = await supabase.rpc('get_game_leaderboard', {
+        p_game_id: gId
+      });
+      if (lbErr) {
+        console.error('[GAME LEADERBOARD ERROR]', lbErr);
+        return;
       }
-    };
-    fetchPreview();
-  }, [roomCode, participant]);
+      if (data) {
+        const formattedLb: GameParticipant[] = data.map((p: any) => ({
+          id: p.participant_id,
+          game_id: gId,
+          participant_name: p.participant_name,
+          participant_number: String(p.participant_number).padStart(2, '0'),
+          total_score: p.total_score || 0,
+          correct_count: p.correct_count || 0,
+          wrong_count: p.wrong_count || 0,
+          unanswered_count: 0
+        }));
+        setLeaderboard(formattedLb);
+      }
+    } catch (err) {
+      console.error('[GAME LEADERBOARD ERROR]', err);
+    }
+  };
+
+  // Central loadGameState function calling get_game_state RPC
+  const loadGameState = async (targetGameId?: string, targetPartId?: string, targetToken?: string) => {
+    const gId = targetGameId || room?.id;
+    const pId = targetPartId || participant?.id;
+    const sToken = targetToken || participant?.session_token;
+
+    if (!gId || !pId || !sToken) return;
+
+    try {
+      const { data, error: stateErr } = await supabase.rpc('get_game_state', {
+        p_game_id: gId,
+        p_participant_id: pId,
+        p_session_token: sToken
+      });
+
+      if (stateErr) {
+        console.error('[GAME STATE ERROR]', stateErr);
+        setError(stateErr.message);
+        return;
+      }
+
+      if (!data || !data.success) {
+        return;
+      }
+
+      const gData = data.game;
+      const pData = data.participant;
+      const qData = data.question;
+
+      if (gData) {
+        const prevOrder = lastKnownOrderRef.current;
+        const newOrder = gData.current_question_order || 0;
+        const prevStatus = lastKnownStatusRef.current;
+        const newStatus = gData.status;
+
+        lastKnownOrderRef.current = newOrder;
+        lastKnownStatusRef.current = newStatus;
+
+        setRoom((prev) => ({
+          id: gData.id,
+          title: gData.title,
+          subject: gData.subject,
+          class_level: gData.class_name || '',
+          class_name: gData.class_name || '',
+          pin: prev?.pin || '',
+          room_code: gData.room_code,
+          status: newStatus,
+          current_question_index: Math.max(0, newOrder - 1),
+          question_count: gData.question_count || 0,
+          time_per_question: gData.time_per_question || 20,
+          question_start_time: gData.question_started_at || null,
+          created_at: prev?.created_at || new Date().toISOString()
+        }));
+
+        // Reset user choice when new question starts or status changes
+        if (newOrder !== prevOrder || newStatus !== prevStatus) {
+          setSelectedOption(null);
+          setIsLocked(false);
+          setAnswerResult(null);
+          questionStartTimeRef.current = Date.now();
+        }
+      }
+
+      if (pData) {
+        setParticipant((prev) => ({
+          id: pData.id,
+          game_id: gData?.id || prev?.game_id || gId,
+          participant_name: pData.participant_name,
+          participant_number: String(pData.participant_number).padStart(2, '0'),
+          session_token: sToken,
+          total_score: pData.total_score || 0,
+          correct_count: pData.correct_count || 0,
+          wrong_count: pData.wrong_count || 0,
+          unanswered_count: pData.unanswered_count || 0
+        }));
+      }
+
+      if (qData) {
+        setActiveQuestion(qData);
+      }
+
+      if (gData?.status === 'finished') {
+        loadLeaderboard(gId);
+      }
+    } catch (err: any) {
+      console.error('[GAME ERROR]', err);
+      setError(err?.message || 'Terjadi kesalahan pada Game');
+    }
+  };
+
+  // Restore session on mount if student refreshes page
+  useEffect(() => {
+    const code = (initialRoomCode || roomCode || '').trim().toUpperCase();
+    const saved = (code ? localStorage.getItem(`emkain_active_game_${code}`) : null) || localStorage.getItem('emkain_active_game_last');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.gameId && parsed.participantId && parsed.sessionToken) {
+          loadGameState(parsed.gameId, parsed.participantId, parsed.sessionToken);
+        }
+      } catch (e) {
+        console.error('[RESTORE GAME SESSION ERROR]', e);
+      }
+    }
+  }, [initialRoomCode]);
 
   // Supabase Realtime subscription specifically for this game room
   useEffect(() => {
-    if (!room?.id || !participant?.id) return;
+    if (!room?.id || !participant?.id || !participant?.session_token) return;
 
     const channel = supabase
       .channel(`game_room_student_${room.id}`)
@@ -113,27 +216,14 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           console.log('[GAME REALTIME ROOM UPDATE]', payload);
           if (payload.new) {
             const updated = payload.new;
-            setRoom((prev) => {
-              if (!prev) return null;
-              const newIndex = updated.current_question_order !== undefined
-                ? updated.current_question_order
-                : (updated.current_question_index !== undefined ? updated.current_question_index : prev.current_question_index);
-
-              if (newIndex !== prev.current_question_index || updated.status !== prev.status) {
-                setSelectedOption(null);
-                setIsLocked(false);
-                setAnswerResult(null);
-                questionStartTimeRef.current = Date.now();
-              }
-
-              return {
-                ...prev,
-                status: updated.status || prev.status,
-                current_question_index: newIndex,
-                question_start_time: updated.question_started_at || updated.question_start_time || prev.question_start_time,
-                time_per_question: updated.time_per_question || prev.time_per_question
-              };
-            });
+            if (
+              updated.status === 'playing' ||
+              updated.status === 'finished' ||
+              (updated.current_question_order !== undefined && updated.current_question_order !== lastKnownOrderRef.current) ||
+              updated.status !== lastKnownStatusRef.current
+            ) {
+              loadGameState(room.id, participant.id, participant.session_token);
+            }
           }
         }
       )
@@ -143,28 +233,22 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           event: '*',
           schema: 'public',
           table: 'game_participants',
-          filter: `game_id=eq.${room.id}`
+          filter: `id=eq.${participant.id}`
         },
         (payload: any) => {
-          console.log('[GAME REALTIME PARTICIPANT UPDATE]', payload);
           if (payload.new) {
             const updated = payload.new;
-            if (updated.id === participant.id) {
-              setParticipant((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      total_score: updated.total_score !== undefined ? updated.total_score : prev.total_score,
-                      correct_count: updated.correct_count !== undefined ? updated.correct_count : prev.correct_count,
-                      wrong_count: updated.wrong_count !== undefined ? updated.wrong_count : prev.wrong_count,
-                      unanswered_count: updated.unanswered_count !== undefined ? updated.unanswered_count : prev.unanswered_count,
-                      participant_number: updated.participant_number
-                        ? String(updated.participant_number).padStart(2, '0')
-                        : prev.participant_number
-                    }
-                  : null
-              );
-            }
+            setParticipant((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    total_score: updated.total_score !== undefined ? updated.total_score : prev.total_score,
+                    correct_count: updated.correct_count !== undefined ? updated.correct_count : prev.correct_count,
+                    wrong_count: updated.wrong_count !== undefined ? updated.wrong_count : prev.wrong_count,
+                    unanswered_count: updated.unanswered_count !== undefined ? updated.unanswered_count : prev.unanswered_count
+                  }
+                : null
+            );
           }
         }
       )
@@ -173,76 +257,45 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [room?.id, participant?.id]);
+  }, [room?.id, participant?.id, participant?.session_token]);
 
-  // Periodic state and leaderboard sync directly from Supabase
+  // Fallback polling: if status is 'waiting', check state every 1 second
   useEffect(() => {
-    if (!room?.id || !participant?.id) return;
+    if (!room?.id || !participant?.id || room.status !== 'waiting') return;
 
-    const syncState = async () => {
+    const interval = setInterval(async () => {
       try {
-        const { data: roomData } = await supabase
+        const { data: rData } = await supabase
           .from('game_rooms')
-          .select('*')
+          .select('status, current_question_order')
           .eq('id', room.id)
           .maybeSingle();
 
-        if (roomData) {
-          const prevStatus = room.status;
-          const prevIndex = room.current_question_index;
-          const newIndex = roomData.current_question_order !== undefined
-            ? roomData.current_question_order
-            : (roomData.current_question_index !== undefined ? roomData.current_question_index : prevIndex);
-
-          setRoom((prev) => prev ? {
-            ...prev,
-            status: roomData.status,
-            current_question_index: newIndex,
-            question_start_time: roomData.question_started_at || roomData.question_start_time,
-            time_per_question: roomData.time_per_question || prev.time_per_question
-          } : null);
-
-          if (newIndex !== prevIndex || roomData.status !== prevStatus) {
-            setSelectedOption(null);
-            setIsLocked(false);
-            setAnswerResult(null);
-            questionStartTimeRef.current = Date.now();
-          }
-        }
-
-        if (room.status === 'playing' || room.status === 'finished') {
-          const { data: lbData } = await supabase
-            .from('game_participants')
-            .select('*')
-            .eq('game_id', room.id)
-            .order('total_score', { ascending: false });
-
-          if (lbData) {
-            const formattedLb = lbData.map((p: any) => ({
-              ...p,
-              participant_number: String(p.participant_number).padStart(2, '0')
-            }));
-            setLeaderboard(formattedLb);
-            const me = formattedLb.find((p: any) => p.id === participant.id);
-            if (me) {
-              setParticipant((prev) => prev ? { ...prev, total_score: me.total_score } : me);
-            }
-          }
+        if (rData && (rData.status === 'playing' || rData.status === 'finished')) {
+          clearInterval(interval);
+          loadGameState(room.id, participant.id, participant.session_token);
         }
       } catch {
-        // silent sync catch
+        // silent
       }
-    };
+    }, 1000);
 
-    syncState();
-    pollIntervalRef.current = setInterval(syncState, 2500);
+    return () => clearInterval(interval);
+  }, [room?.id, room?.status, participant?.id, participant?.session_token]);
 
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
-  }, [room?.id, room?.status, room?.current_question_index, participant?.id]);
+  // Periodic leaderboard sync if playing or finished
+  useEffect(() => {
+    if (!room?.id || !participant?.id) return;
+    if (room.status !== 'playing' && room.status !== 'finished') return;
 
-  // Countdown timer for active question
+    const interval = setInterval(() => {
+      loadLeaderboard(room.id);
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [room?.id, room?.status, participant?.id]);
+
+  // Countdown timer for active question based on database question_start_time
   useEffect(() => {
     if (!room || room.status !== 'playing' || !room.question_start_time) return;
 
@@ -263,7 +316,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
   // Join Room Handler via Supabase RPC
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return; // Prevent double click
+    if (loading) return;
     setError(null);
 
     const roomCodeClean = roomCode.trim().toUpperCase();
@@ -320,13 +373,6 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
 
       if (rpcError) {
         console.error('[GAME JOIN ERROR]', rpcError);
-        console.error('[GAME JOIN DEBUG]', {
-          roomCode: roomCodeClean,
-          pin: pinClean,
-          participantName: participantNameClean,
-          sessionToken,
-          error: rpcError
-        });
         setError(rpcError.message || 'Gagal masuk ke Game Room');
         return;
       }
@@ -340,131 +386,83 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
         return;
       }
 
-      const formattedNumber = String(participantData.participant_number).padStart(2, '0');
+      const effectiveToken = participantData.session_token || sessionToken;
+      localStorage.setItem(storageKey, effectiveToken);
 
-      const normalizedRoom: GameRoom = {
-        id: gameData.id,
-        title: gameData.title,
-        subject: gameData.subject,
-        class_level: gameData.class_name || gameData.class_level || '',
-        class_name: gameData.class_name || gameData.class_level || '',
-        pin: String(gameData.pin),
-        room_code: String(gameData.room_code),
-        status: (gameData.status as any) || 'waiting',
-        current_question_index: gameData.current_question_order !== undefined
-          ? gameData.current_question_order
-          : (gameData.current_question_index || 0),
-        question_start_time: gameData.question_started_at || gameData.question_start_time || null,
-        question_count: gameData.question_count || 0,
-        time_per_question: gameData.time_per_question || 20,
-        created_at: gameData.created_at || new Date().toISOString()
-      };
+      // Save for refresh recovery
+      localStorage.setItem(`emkain_active_game_${roomCodeClean}`, JSON.stringify({
+        gameId: gameData.id,
+        participantId: participantData.id,
+        sessionToken: effectiveToken,
+        roomCode: roomCodeClean
+      }));
+      localStorage.setItem('emkain_active_game_last', JSON.stringify({
+        gameId: gameData.id,
+        participantId: participantData.id,
+        sessionToken: effectiveToken,
+        roomCode: roomCodeClean
+      }));
 
-      const normalizedParticipant: GameParticipant = {
-        id: participantData.id,
-        game_id: gameData.id,
-        participant_number: formattedNumber,
-        participant_name: participantData.participant_name,
-        session_token: participantData.session_token || sessionToken,
-        total_score: participantData.total_score || 0,
-        correct_count: participantData.correct_count || 0,
-        wrong_count: participantData.wrong_count || 0,
-        unanswered_count: participantData.unanswered_count || 0
-      };
-
-      if (participantData.session_token) {
-        localStorage.setItem(storageKey, participantData.session_token);
-      }
-
-      setRoom(normalizedRoom);
-      setParticipant(normalizedParticipant);
-      setStoredParticipant(roomCodeClean, normalizedParticipant);
-
-      // Load questions directly from Supabase
-      try {
-        const { data: qData } = await supabase
-          .from('game_questions')
-          .select('*')
-          .eq('game_id', gameData.id)
-          .order('question_order', { ascending: true });
-        if (qData && qData.length > 0) {
-          setQuestions(qData as GameQuestion[]);
-        }
-      } catch (err) {
-        console.error('[LOAD QUESTIONS ERROR]', err);
-      }
+      // Immediately fetch latest game state
+      await loadGameState(gameData.id, participantData.id, effectiveToken);
 
     } catch (err: any) {
       console.error('[GAME JOIN ERROR]', err);
-      console.error('[GAME JOIN DEBUG]', {
-        roomCode: roomCodeClean,
-        pin: pinClean,
-        participantName: participantNameClean,
-        sessionToken,
-        error: err
-      });
       setError(err.message || 'Gagal masuk ke Game Room');
     } finally {
       setLoading(false);
     }
   };
 
-  // Submit Answer Handler
+  // Submit Answer Handler via Supabase RPC
   const handleSelectAnswer = async (option: 'A' | 'B' | 'C' | 'D') => {
     if (isLocked || !room || !participant || secondsLeft <= 0) return;
 
     setSelectedOption(option);
     setIsLocked(true);
 
-    const respMs = Date.now() - questionStartTimeRef.current;
-
     try {
-      const currentQ = questions[room.current_question_index];
-      const isCorrect = currentQ && currentQ.correct_answer === option;
-      const score = isCorrect ? Math.max(100, Math.floor(1000 - (respMs / 1000) * 40)) : 0;
+      const { data, error: rpcError } = await supabase.rpc('submit_game_answer', {
+        p_game_id: room.id,
+        p_participant_id: participant.id,
+        p_session_token: participant.session_token,
+        p_answer: option
+      });
 
-      // Try API if available, fallback smoothly
-      try {
-        const res = await submitGameAnswerApi({
-          roomId: room.id,
-          participantId: participant.id,
-          questionIndex: room.current_question_index,
-          answer: option,
-          responseTimeMs: respMs
+      if (rpcError) {
+        console.error('[GAME RPC ERROR]', rpcError);
+        setError(rpcError.message);
+        return;
+      }
+
+      if (data) {
+        setAnswerResult({
+          is_correct: data.is_correct,
+          score: data.score,
+          correct_answer: data.correct_answer
         });
 
-        if (res.success) {
-          setAnswerResult({
-            is_correct: res.is_correct,
-            score: res.score,
-            correct_answer: res.correct_answer
-          });
-          if (res.score) {
-            setParticipant(prev => prev ? { ...prev, total_score: (prev.total_score || 0) + (res.score || 0) } : null);
-          }
-          return;
+        if (data.score && data.score > 0) {
+          setParticipant((prev) =>
+            prev ? { ...prev, total_score: (prev.total_score || 0) + data.score } : null
+          );
         }
-      } catch {
-        // silent fallback
-      }
-
-      setAnswerResult({
-        is_correct: isCorrect,
-        score: score,
-        correct_answer: currentQ?.correct_answer
-      });
-      if (score > 0) {
-        setParticipant(prev => prev ? { ...prev, total_score: (prev.total_score || 0) + score } : null);
       }
     } catch (err: any) {
-      console.error('Answer submission error:', err);
+      console.error('[GAME ERROR]', err);
+      setError(err?.message || 'Terjadi kesalahan pada Game');
     }
   };
 
   const handleExitRoom = () => {
-    if (room) clearStoredParticipant(room.room_code);
+    if (room) {
+      localStorage.removeItem(`emkain_active_game_${room.room_code}`);
+      clearStoredParticipant(room.room_code);
+    }
+    localStorage.removeItem('emkain_active_game_last');
     setParticipant(null);
     setRoom(null);
+    setActiveQuestion(null);
     if (onExit) onExit();
   };
 
@@ -647,8 +645,26 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
   // =========================================================================
   // VIEW 3: ACTIVE QUESTION SCREEN (Live Answering for Student)
   // =========================================================================
-  const currentQ = questions[room.current_question_index];
+  const currentQ = activeQuestion || questions[room.current_question_index];
   const maxScore = Math.max(...leaderboard.map(p => p.total_score || 0), 1000);
+
+  if (room.status === 'playing' && !currentQ) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center p-3 md:p-6 font-body">
+        <div className="w-full max-w-md bg-white rounded-2xl border-3 border-gray-900 shadow-[6px_6px_0_rgba(0,0,0,1)] p-6 md:p-8 text-center space-y-6">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#FFD166] border-2 border-gray-900 shadow-[3px_3px_0_rgba(0,0,0,1)] text-3xl mx-auto animate-bounce">
+            ⚡
+          </div>
+          <h2 className="text-xl font-black font-display uppercase tracking-tight text-gray-900">
+            MEMPERSIAPKAN SOAL...
+          </h2>
+          <p className="text-xs font-bold text-gray-600">
+            Sedang memuat soal kuis dari server...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (room.status === 'playing' && currentQ) {
     return (
@@ -684,7 +700,7 @@ export const StudentGameJoin: React.FC<StudentGameJoinProps> = ({
           
           <div className="flex items-center justify-between">
             <span className="px-3 py-1 bg-[#FF8B7B] rounded-full border-2 border-gray-900 text-xs font-black uppercase text-gray-900">
-              SOAL {room.current_question_index + 1} DARI {room.question_count}
+              SOAL {currentQ.question_order !== undefined ? currentQ.question_order : (room.current_question_index + 1)} DARI {room.question_count}
             </span>
             <span className="text-xs font-bold text-gray-400">
               {room.time_per_question} Detik
