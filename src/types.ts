@@ -216,6 +216,7 @@ export interface GameRoom {
   title: string;
   subject: string;
   class_level: string;
+  class_name?: string;
   pin: string;
   room_code: string;
   status: GameStatus;
@@ -244,6 +245,7 @@ export interface GameParticipant {
   game_id: string;
   participant_number: string;
   participant_name: string;
+  session_token?: string | null;
   user_id?: string | null;
   joined_at?: string;
   total_score: number;

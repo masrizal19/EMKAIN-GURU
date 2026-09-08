@@ -209,6 +209,7 @@ export async function joinGameRoomApi(payload: {
   room_code: string;
   pin: string;
   participant_name: string;
+  session_token?: string | null;
   user_id?: string;
   existing_participant_id?: string;
 }): Promise<{
@@ -218,14 +219,98 @@ export async function joinGameRoomApi(payload: {
   error?: string;
 }> {
   try {
-    const res = await fetch(getApiUrl('/api/game/join'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    const roomCode = payload.room_code.trim().toUpperCase();
+    const pin = payload.pin.trim();
+    const participantName = payload.participant_name.trim();
+    const sessionToken = payload.session_token || null;
+
+    console.log('[GAME JOIN REQUEST]', {
+      roomCode,
+      pin,
+      participantName,
+      sessionToken
     });
-    return await res.json();
+
+    const { data, error } = await supabase.rpc('join_game_room', {
+      p_room_code: roomCode,
+      p_pin: pin,
+      p_name: participantName,
+      p_session_token: sessionToken
+    });
+
+    if (error) {
+      console.error('[GAME JOIN ERROR]', error);
+      console.error('[GAME JOIN DEBUG]', {
+        roomCode,
+        pin,
+        participantName,
+        sessionToken,
+        error
+      });
+      return {
+        success: false,
+        error: error.message || 'Gagal masuk ke Game Room'
+      };
+    }
+
+    if (!data || !data.success || !data.participant || !data.game) {
+      console.error('[GAME JOIN INVALID RESPONSE]', data);
+      return {
+        success: false,
+        error: (data as any)?.message || 'Data Game Room tidak lengkap dari Supabase.'
+      };
+    }
+
+    const game = data.game;
+    const participant = data.participant;
+
+    const formattedNumber = String(participant.participant_number).padStart(2, '0');
+
+    const normalizedRoom: GameRoom = {
+      id: game.id,
+      title: game.title,
+      subject: game.subject,
+      class_level: game.class_name || game.class_level || '',
+      class_name: game.class_name || game.class_level || '',
+      pin: String(game.pin),
+      room_code: String(game.room_code),
+      status: (game.status as any) || 'waiting',
+      current_question_index: game.current_question_order !== undefined
+        ? game.current_question_order
+        : (game.current_question_index || 0),
+      question_start_time: game.question_started_at || game.question_start_time || null,
+      question_count: game.question_count || 0,
+      time_per_question: game.time_per_question || 20,
+      created_at: game.created_at || new Date().toISOString()
+    };
+
+    const normalizedParticipant: GameParticipant = {
+      id: participant.id,
+      game_id: game.id,
+      participant_number: formattedNumber,
+      participant_name: participant.participant_name,
+      session_token: participant.session_token || sessionToken,
+      total_score: participant.total_score || 0,
+      correct_count: participant.correct_count || 0,
+      wrong_count: participant.wrong_count || 0,
+      unanswered_count: participant.unanswered_count || 0
+    };
+
+    return {
+      success: true,
+      participant: normalizedParticipant,
+      room: normalizedRoom
+    };
   } catch (err: any) {
-    return { success: false, error: err.message || 'Gagal bergabung ke room' };
+    console.error('[GAME JOIN ERROR]', err);
+    console.error('[GAME JOIN DEBUG]', {
+      payload,
+      error: err
+    });
+    return {
+      success: false,
+      error: err.message || 'Gagal terhubung ke Supabase. Periksa koneksi dan coba lagi.'
+    };
   }
 }
 
